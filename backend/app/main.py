@@ -4,9 +4,11 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 
 from app import config
 from app.engine import plan_all, plan_date_bounds, validate_plan_date
+from app.export import XLSX_MEDIA_TYPE, build_export
 from app.models import (InputFileError, InspectResponse, ParsedInput, RunListItem, RunRecord,
                         SupplierSetting, SupplierSettingView, SupplierSummary)
 from app.parsing import parse_input
@@ -100,6 +102,13 @@ def create_app(db_path: Path = config.DB_PATH) -> FastAPI:
     @app.get("/api/runs/{run_id}/suppliers", response_model=list[SupplierSummary])
     def run_suppliers(run_id: int, window_weeks: int = Query(4, ge=1, le=52)) -> list[SupplierSummary]:
         return summarize_suppliers(get_run_or_404(run_id).result, window_weeks)
+
+    @app.get("/api/runs/{run_id}/export")
+    def export_run(run_id: int, window_weeks: int = Query(4, ge=1, le=52)) -> Response:
+        run = get_run_or_404(run_id)
+        filename = f"order-plan-{run.plan_date.isoformat()}-run{run.id}.xlsx"
+        return Response(content=build_export(run, window_weeks), media_type=XLSX_MEDIA_TYPE,
+                        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
     def settings_views() -> list[SupplierSettingView]:
         stats: dict[str, tuple[int, int | None]] = {}

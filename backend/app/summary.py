@@ -1,7 +1,7 @@
 """Per-supplier roll-up of a plan result."""
 from datetime import date, timedelta
 
-from app.models import PlanResult, SkuPlan, SupplierSummary
+from app.models import PlannedOrder, PlanResult, SkuPlan, SupplierSummary
 
 
 def count_flags(skus: list[SkuPlan]) -> dict[str, int]:
@@ -13,12 +13,17 @@ def count_flags(skus: list[SkuPlan]) -> dict[str, int]:
     return counts
 
 
+def orders_in_window(sku: SkuPlan, plan_date: date, window_weeks: int) -> list[PlannedOrder]:
+    """The SKU's orders placed before plan_date + 7 * window_weeks days."""
+    cutoff = plan_date + timedelta(days=7 * window_weeks)
+    return [o for o in sku.orders if o.order_date < cutoff]
+
+
 def summarize_suppliers(result: PlanResult, window_weeks: int = 4) -> list[SupplierSummary]:
-    cutoff = result.plan_date + timedelta(days=7 * window_weeks)
     summaries: list[SupplierSummary] = []
     for setting in result.settings_used:
         skus = [s for s in result.skus if s.supplier == setting.supplier]
-        in_window = [[o for o in s.orders if o.order_date < cutoff] for s in skus]
+        in_window = [orders_in_window(s, result.plan_date, window_weeks) for s in skus]
         all_dates = [o.order_date for s in skus for o in s.orders]  # earliest is not window-limited
         leads = [s.lead_time_days for s in skus if s.lead_time_days is not None]
         summaries.append(SupplierSummary(
