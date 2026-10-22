@@ -1,4 +1,5 @@
 from datetime import date
+from enum import Enum
 
 from pydantic import BaseModel
 
@@ -36,3 +37,79 @@ class ParsedInput(BaseModel):
     mtd_end: date
     default_plan_date: date
     warnings: list[ParseWarning]
+
+
+class SupplierSetting(BaseModel):
+    supplier: str
+    reorder_days: int
+    target_days: int
+    is_default: bool = False
+
+
+class FlagCode(str, Enum):
+    ORDER_NOW = "ORDER_NOW"
+    STOCKOUT_RISK = "STOCKOUT_RISK"
+    EXCESS = "EXCESS"
+    EXPIRY_RISK = "EXPIRY_RISK"
+    NO_FORECAST_HOLDING_STOCK = "NO_FORECAST_HOLDING_STOCK"
+    MTD_ABOVE_FORECAST = "MTD_ABOVE_FORECAST"
+    LEAD_TIME_EXCEEDS_REORDER = "LEAD_TIME_EXCEEDS_REORDER"
+    MOQ_EXCEEDS_SHELF_LIFE = "MOQ_EXCEEDS_SHELF_LIFE"
+    MISSING_LEAD_TIME = "MISSING_LEAD_TIME"
+
+
+class Flag(BaseModel):
+    code: FlagCode
+    message: str
+
+
+class OrderReason(BaseModel):
+    on_hand: float
+    on_order: float
+    inventory_position: float
+    reorder_qty: float
+    target_qty: float
+    raw_qty: float
+    moq_applied: bool
+    shelf_life_cap: float | None
+    cap_applied: bool
+
+
+class PlannedOrder(BaseModel):
+    order_date: date
+    arrival_date: date
+    qty: int
+    reason: OrderReason
+
+
+class WeekProjection(BaseModel):
+    week: int  # 1-based
+    start: date
+    end: date
+    demand: float
+    arrivals: float
+    closing_stock: float
+    lost: float
+    reorder_qty: float  # at week start
+    target_qty: float  # at week start
+
+
+class SkuPlan(BaseModel):
+    sap_code: str
+    supplier: str
+    description: str
+    lead_time_days: int | None
+    moq: float
+    shelf_life_months: float | None
+    sellable: float
+    non_sellable: float
+    sit: float
+    starting_stock: float
+    days_of_cover: float | None
+    total_forecast: float
+    orders: list[PlannedOrder]
+    weeks: list[WeekProjection]
+    flags: list[Flag]
+    stockout_days: int
+    stockout_qty: float
+    first_stockout_date: date | None
