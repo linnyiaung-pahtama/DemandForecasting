@@ -169,12 +169,17 @@ def plan_sku(sku: SkuInput, setting: SupplierSetting, demand: DemandSeries,
         first_stockout_date=first_stockout_date)
 
 
-def validate_plan_date(parsed: ParsedInput, plan_date: date) -> None:
-    """Plan date must be after the MTD end and within the forecast months."""
+def plan_date_bounds(parsed: ParsedInput) -> tuple[date, date]:
+    """Earliest and latest allowed plan date: the day after MTD end to the last forecast month's end."""
     year, mon = (int(p) for p in parsed.forecast_months[-1].split("-"))
     last = date(year, mon, calendar.monthrange(year, mon)[1])
-    earliest = parsed.mtd_end + timedelta(days=1)
-    if plan_date <= parsed.mtd_end or plan_date > last:
+    return parsed.mtd_end + timedelta(days=1), last
+
+
+def validate_plan_date(parsed: ParsedInput, plan_date: date) -> None:
+    """Plan date must be after the MTD end and within the forecast months."""
+    earliest, last = plan_date_bounds(parsed)
+    if plan_date < earliest or plan_date > last:
         raise ValueError(
             f"Plan date {plan_date.isoformat()} is outside the allowed range: "
             f"{earliest.isoformat()} to {last.isoformat()}.")

@@ -148,3 +148,20 @@ class RunListItem(BaseModel):
 class RunRecord(RunListItem):
     parsed: ParsedInput
     result: PlanResult
+
+
+class SupplierSettingView(SupplierSetting):
+    max_lead_time_days: int | None
+    sku_count: int
+
+
+class InspectResponse(BaseModel):
+    file_name: str
+    sku_count: int
+    supplier_count: int
+    forecast_months: list[str]
+    mtd_label: str
+    default_plan_date: date
+    min_plan_date: date
+    max_plan_date: date
+    warnings: list[ParseWarning]
