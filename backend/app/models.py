@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from enum import Enum
 
 from pydantic import BaseModel
@@ -135,3 +135,16 @@ class PlanResult(BaseModel):
     settings_used: list[SupplierSetting]
     new_suppliers: list[str]
     flag_counts: dict[str, int]
+
+
+class RunListItem(BaseModel):
+    id: int
+    created_at: datetime
+    file_name: str
+    plan_date: date
+    sku_count: int
+
+
+class RunRecord(RunListItem):
+    parsed: ParsedInput
+    result: PlanResult
