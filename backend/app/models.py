@@ -114,3 +114,24 @@ class SkuPlan(BaseModel):
     stockout_days: int
     stockout_qty: float
     first_stockout_date: date | None
+
+
+class SupplierSummary(BaseModel):
+    supplier: str
+    reorder_days: int
+    target_days: int
+    is_default: bool
+    sku_count: int
+    skus_to_order: int
+    cartons_in_window: int
+    earliest_order_date: date | None
+    flag_counts: dict[str, int]
+    max_lead_time_days: int | None
+
+
+class PlanResult(BaseModel):
+    plan_date: date
+    skus: list[SkuPlan]
+    settings_used: list[SupplierSetting]
+    new_suppliers: list[str]
+    flag_counts: dict[str, int]

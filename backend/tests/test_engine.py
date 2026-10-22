@@ -83,3 +83,49 @@ def test_negative_starting_stock_is_floored():
     p = run(-100)
     assert p.stockout_qty == pytest.approx(70)   # order day 0, arrival day 7, 7 days x 10 lost
     assert p.starting_stock == -100
+
+
+def test_flags_lead_time_at_or_above_reorder():
+    assert FlagCode.LEAD_TIME_EXCEEDS_REORDER in codes(run(1000, lt=30, reorder=20))
+    assert FlagCode.LEAD_TIME_EXCEEDS_REORDER not in codes(run(1000, lt=30, reorder=20, daily=0.0))
+
+def test_flags_excess_and_expiry_risk():
+    p = run(1000, shelf=1)                 # 100 days cover > 30*1.5; > 300 sells in 30 days
+    assert {FlagCode.EXCESS, FlagCode.EXPIRY_RISK} <= codes(p)
+    assert FlagCode.EXCESS not in codes(run(400))   # 40 days <= 45
+
+def test_flags_no_forecast_holding_stock():
+    assert FlagCode.NO_FORECAST_HOLDING_STOCK in codes(run(50, daily=0.0))
+    assert FlagCode.NO_FORECAST_HOLDING_STOCK not in codes(run(0, daily=0.0))
+
+def test_negative_stock_is_floored_for_flags():
+    assert FlagCode.NO_FORECAST_HOLDING_STOCK not in codes(run(-50, daily=0.0))
+    assert FlagCode.EXPIRY_RISK not in codes(run(-500, shelf=1))
+
+def test_flags_missing_lead_time():
+    assert FlagCode.MISSING_LEAD_TIME in codes(run(50, lt=None))
+    assert FlagCode.MISSING_LEAD_TIME in codes(run(50, lt=-3))
+    assert FlagCode.MISSING_LEAD_TIME not in codes(run(50, lt=0))
+
+def test_plan_all_uses_defaults_for_new_supplier_and_flags_mtd_above_forecast():
+    from app.engine import plan_all
+    from tests.helpers import make_workbook
+    from app.parsing import parse_input
+    parsed = parse_input(make_workbook([["1001","NewCo","X",12,0,6,7,10,0,0,500] + [310]*12]))
+    r = plan_all(parsed, {}, parsed.default_plan_date)
+    assert r.new_suppliers == ["NewCo"]
+    assert r.settings_used[0].reorder_days == 20 and r.settings_used[0].is_default
+    assert FlagCode.MTD_ABOVE_FORECAST in {f.code for f in r.skus[0].flags}
+    assert r.flag_counts["MTD_ABOVE_FORECAST"] == 1
+    # rest of Oct has zero demand, so the 20-day reorder window first exceeds stock (10) on day 1,
+    # when it reaches 1 Nov (310/30 = 10.33)
+    assert r.skus[0].orders[0].order_date == date(2026, 10, 13)
+
+def test_validate_plan_date_range():
+    from app.engine import validate_plan_date
+    from app.parsing import parse_input
+    from tests.test_parsing import SAMPLE
+    parsed = parse_input(SAMPLE.read_bytes())
+    validate_plan_date(parsed, date(2026, 10, 12))
+    with pytest.raises(ValueError): validate_plan_date(parsed, date(2026, 10, 11))
+    with pytest.raises(ValueError): validate_plan_date(parsed, date(2027, 10, 1))
