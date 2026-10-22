@@ -7,12 +7,14 @@ from app.models import SkuInput, SupplierSetting, FlagCode
 PD = date(2026, 10, 12)
 def day(n): return PD + timedelta(days=n)
 
-def run(sellable, sit=0, lt=7, moq=0, shelf=None, reorder=20, target=30, daily=10.0, h=60):
+def run(sellable, sit=0, lt=7, moq=0, shelf=None, reorder=20, target=30, daily=10.0, h=60,
+        mtd=0, month_fc=0.0):
     sku = SkuInput(sap_code="1", supplier="S", description="d", packing_size=1, moq=moq,
                    shelf_life_months=shelf, lead_time_days=lt, sellable=sellable,
-                   non_sellable=0, sit=sit, mtd_sales=0, forecast={"2026-10": 1})
+                   non_sellable=0, sit=sit, mtd_sales=mtd, forecast={"2026-10": 1})
     return plan_sku(sku, SupplierSetting(supplier="S", reorder_days=reorder, target_days=target),
-                    DemandSeries(daily=[daily] * h, tail_rate=daily), PD)
+                    DemandSeries(daily=[daily] * h, tail_rate=daily), PD,
+                    current_month_forecast=month_fc)
 
 def codes(p): return {f.code for f in p.flags}
 
@@ -129,3 +131,17 @@ def test_validate_plan_date_range():
     validate_plan_date(parsed, date(2026, 10, 12))
     with pytest.raises(ValueError): validate_plan_date(parsed, date(2026, 10, 11))
     with pytest.raises(ValueError): validate_plan_date(parsed, date(2027, 10, 1))
+
+
+def test_flag_boundaries_do_not_fire():
+    # MTD flag needs mtd > month forecast > 0
+    assert FlagCode.MTD_ABOVE_FORECAST in codes(run(1000, mtd=101, month_fc=100))
+    assert FlagCode.MTD_ABOVE_FORECAST not in codes(run(1000, mtd=100, month_fc=100))
+    assert FlagCode.MTD_ABOVE_FORECAST not in codes(run(1000, mtd=50, month_fc=0.0))
+    # expiry risk: shelf 1 month = 30 days, cover = 300 cartons at 10/day
+    assert FlagCode.EXPIRY_RISK in codes(run(301, shelf=1))
+    assert FlagCode.EXPIRY_RISK not in codes(run(300, shelf=1))
+    assert FlagCode.EXPIRY_RISK not in codes(run(200, shelf=1))
+    # lead time just below the reorder level
+    assert FlagCode.LEAD_TIME_EXCEEDS_REORDER not in codes(run(1000, lt=19, reorder=20))
+    assert FlagCode.LEAD_TIME_EXCEEDS_REORDER in codes(run(1000, lt=20, reorder=20))

@@ -7,6 +7,7 @@ from app.config import DEFAULT_REORDER_DAYS, DEFAULT_TARGET_DAYS, EXCESS_FACTOR
 from app.demand import DemandSeries, build_demand
 from app.models import (Flag, FlagCode, OrderReason, ParsedInput, PlanResult, PlannedOrder,
                         SkuInput, SkuPlan, SupplierSetting, WeekProjection)
+from app.summary import count_flags
 
 EPS = 1e-9
 
@@ -185,7 +186,6 @@ def plan_all(parsed: ParsedInput, settings: dict[str, SupplierSetting],
     used: dict[str, SupplierSetting] = {}
     new_suppliers: list[str] = []
     skus: list[SkuPlan] = []
-    flag_counts: dict[str, int] = {}
     for sku in parsed.skus:
         if sku.supplier not in used:
             setting = settings.get(sku.supplier)
@@ -198,7 +198,5 @@ def plan_all(parsed: ParsedInput, settings: dict[str, SupplierSetting],
         plan = plan_sku(sku, used[sku.supplier], demand, plan_date,
                         current_month_forecast=sku.forecast.get(current_month_key, 0.0))
         skus.append(plan)
-        for code in {f.code for f in plan.flags}:
-            flag_counts[code.value] = flag_counts.get(code.value, 0) + 1
     return PlanResult(plan_date=plan_date, skus=skus, settings_used=list(used.values()),
-                      new_suppliers=new_suppliers, flag_counts=flag_counts)
+                      new_suppliers=new_suppliers, flag_counts=count_flags(skus))
