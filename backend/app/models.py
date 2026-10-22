@@ -67,6 +67,7 @@ class OrderReason(BaseModel):
     on_hand: float
     on_order: float
     inventory_position: float
+    stock_at_arrival: float
     reorder_qty: float
     target_qty: float
     raw_qty: float

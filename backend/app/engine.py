@@ -13,9 +13,11 @@ def plan_sku(sku: SkuInput, setting: SupplierSetting, demand: DemandSeries,
              plan_date: date, current_month_forecast: float = 0.0) -> SkuPlan:
     lead = sku.lead_time_days
     shelf_days = round(sku.shelf_life_months * 365 / 12) if sku.shelf_life_months else None
-    starting_stock = sku.sellable + sku.sit
+    starting_stock = sku.sellable + sku.sit  # raw sum, kept visible on the plan
+    opening_stock = max(starting_stock, 0.0)  # the simulation never starts negative
+    can_order = lead is not None and lead >= 0  # missing or negative lead time: no orders
 
-    on_hand = starting_stock
+    on_hand = opening_stock
     pipeline: list[tuple[int, float]] = []  # (arrival_day, qty)
     orders: list[PlannedOrder] = []
     flags: list[Flag] = []
@@ -40,20 +42,22 @@ def plan_sku(sku: SkuInput, setting: SupplierSetting, demand: DemandSeries,
         on_order = sum(q for _, q in pipeline)
         position = max(on_hand, 0.0) + on_order
         reorder_qty = demand.cover_qty(d, setting.reorder_days)
-        if lead is not None and position < reorder_qty:
+        if can_order and position < reorder_qty:
             target_qty = demand.cover_qty(d, setting.target_days)
             raw = target_qty - position
             qty = math.ceil(raw - EPS)
             moq_applied = sku.moq > 0 and qty < sku.moq
             qty = max(qty, math.ceil(sku.moq))
+            at_arrival = max(position - demand.cover_qty(d, lead), 0.0)
             cap: float | None = None
             cap_applied = False
             if shelf_days:
-                at_arrival = max(position - demand.cover_qty(d, lead), 0.0)
                 cap = max(demand.cover_qty(d + lead, shelf_days) - at_arrival, 0.0)
                 if qty > cap + EPS:
                     if sku.moq > 0 and sku.moq > cap:
                         qty = math.ceil(sku.moq)  # MOQ wins; flagged below
+                        moq_applied = True
+                        cap_applied = True
                         moq_exceeds_shelf = True
                     else:
                         qty = math.floor(cap + EPS)
@@ -65,10 +69,14 @@ def plan_sku(sku: SkuInput, setting: SupplierSetting, demand: DemandSeries,
                     qty=qty,
                     reason=OrderReason(
                         on_hand=max(on_hand, 0.0), on_order=on_order,
-                        inventory_position=position, reorder_qty=reorder_qty,
+                        inventory_position=position, stock_at_arrival=at_arrival, reorder_qty=reorder_qty,
                         target_qty=target_qty, raw_qty=raw, moq_applied=moq_applied,
                         shelf_life_cap=cap, cap_applied=cap_applied)))
-                pipeline.append((d + lead, float(qty)))
+                if lead == 0:  # same-day delivery: on hand before today's demand
+                    on_hand += qty
+                    day_arrivals[d] += qty
+                else:
+                    pipeline.append((d + lead, float(qty)))
 
         need = demand.demand(d)
         day_demand[d] = need
@@ -101,7 +109,8 @@ def plan_sku(sku: SkuInput, setting: SupplierSetting, demand: DemandSeries,
 
     if any(o.order_date == plan_date for o in orders):
         flags.append(Flag(code=FlagCode.ORDER_NOW,
-                          message="Order today: stock will not last through the lead time."))
+                          message=("Order today: the inventory position (stock plus on order) is already "
+                                 "below the reorder level.")))
     first_stockout_date = (plan_date + timedelta(days=first_stockout)
                            if first_stockout is not None else None)
     if stockout_qty > 0:
@@ -119,7 +128,7 @@ def plan_sku(sku: SkuInput, setting: SupplierSetting, demand: DemandSeries,
         lead_time_days=lead, moq=sku.moq, shelf_life_months=sku.shelf_life_months,
         sellable=sku.sellable, non_sellable=sku.non_sellable, sit=sku.sit,
         starting_stock=starting_stock,
-        days_of_cover=demand.days_of_cover(0, starting_stock),
+        days_of_cover=demand.days_of_cover(0, opening_stock),
         total_forecast=sum(demand.daily), orders=orders, weeks=weeks, flags=flags,
         stockout_days=stockout_days, stockout_qty=stockout_qty,
         first_stockout_date=first_stockout_date)

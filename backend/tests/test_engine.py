@@ -25,6 +25,7 @@ def test_orders_when_position_drops_below_reorder_level():
     assert (o1.order_date, o1.arrival_date, o1.qty) == (day(11), day(18), 110)
     assert o1.reason.inventory_position == pytest.approx(190)
     assert o1.reason.reorder_qty == pytest.approx(200) and o1.reason.target_qty == pytest.approx(300)
+    assert o1.reason.stock_at_arrival == pytest.approx(120)
     assert (o2.order_date, o2.qty) == (day(22), 110)
     assert p.stockout_days == 0
 
@@ -50,7 +51,9 @@ def test_shelf_life_caps_quantity():
 
 def test_moq_above_shelf_life_cap_is_flagged():
     p = run(300, shelf=1, target=60, moq=500)
-    assert p.orders[0].qty == 500 and FlagCode.MOQ_EXCEEDS_SHELF_LIFE in codes(p)
+    o = p.orders[0]
+    assert o.qty == 500 and FlagCode.MOQ_EXCEEDS_SHELF_LIFE in codes(p)
+    assert o.reason.moq_applied and o.reason.cap_applied
 
 def test_zero_forecast_never_orders():
     p = run(50, daily=0.0)
@@ -66,3 +69,17 @@ def test_weekly_projection():
     assert w1.demand == pytest.approx(70) and w1.closing_stock == pytest.approx(230)
     assert w3.arrivals == pytest.approx(110)       # arrival on day 18
     assert len(p.weeks) == 9                       # 60 days -> 8 full weeks + 1 partial
+
+def test_zero_lead_time_delivers_same_day():
+    p = run(50, lt=0)
+    o = p.orders[0]
+    assert o.order_date == o.arrival_date == day(0)
+    assert p.stockout_qty == pytest.approx(0)
+
+def test_negative_lead_time_never_orders():
+    assert run(50, lt=-3).orders == []
+
+def test_negative_starting_stock_is_floored():
+    p = run(-100)
+    assert p.stockout_qty == pytest.approx(70)   # order day 0, arrival day 7, 7 days x 10 lost
+    assert p.starting_stock == -100
