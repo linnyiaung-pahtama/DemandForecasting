@@ -1,3 +1,4 @@
+import math
 import re
 from datetime import date, timedelta
 from io import BytesIO
@@ -37,6 +38,19 @@ def _norm(value) -> str:
 
 def _is_number(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _to_number(v) -> float | None:
+    """A float for numbers and numeric text (e.g. " 1,250.5 "); None if not numeric."""
+    if _is_number(v):
+        return float(v)
+    if isinstance(v, str):
+        try:
+            n = float(v.strip().replace(",", ""))
+        except ValueError:
+            return None
+        return n if math.isfinite(n) else None
+    return None
 
 
 def parse_input(data: bytes) -> ParsedInput:
@@ -133,36 +147,34 @@ def parse_input(data: bytes) -> ParsedInput:
         seen.add(sap)
 
         def num(i: int, header: str) -> float:
-            v = cell(i)
-            if _is_number(v):
-                return float(v)
+            v = _to_number(cell(i))
+            if v is not None:
+                return v
             warnings.append(ParseWarning(sap_code=sap, column=header,
                                          message="empty or non-numeric value treated as 0"))
             return 0.0
 
-        pack_raw = cell(c_pack)
-        if _is_number(pack_raw):
-            packing = float(pack_raw)
-        else:
-            packing = None
+        packing = _to_number(cell(c_pack))
+        if packing is None:
             warnings.append(ParseWarning(sap_code=sap, column=h_pack,
                                          message="empty or non-numeric packing size treated as unknown"))
 
         shelf_raw = cell(c_shelf)
+        shelf_num = _to_number(shelf_raw)
         shelf: float | None = None
-        if _is_number(shelf_raw):
-            if shelf_raw == 0:
+        if shelf_num is not None:
+            if shelf_num == 0:
                 warnings.append(ParseWarning(sap_code=sap, column=h_shelf,
                                              message="shelf life 0 treated as unknown (no cap)"))
             else:
-                shelf = float(shelf_raw)
+                shelf = shelf_num
         elif shelf_raw is not None and _collapse(shelf_raw) not in ("", "-"):
             warnings.append(ParseWarning(sap_code=sap, column=h_shelf,
                                          message="non-numeric shelf life treated as unknown (no cap)"))
 
-        lead_raw = cell(c_lead)
-        if _is_number(lead_raw):
-            lead: int | None = int(round(lead_raw))
+        lead_num = _to_number(cell(c_lead))
+        if lead_num is not None:
+            lead: int | None = int(round(lead_num))
         else:
             lead = None
             warnings.append(ParseWarning(sap_code=sap, column=h_lead,

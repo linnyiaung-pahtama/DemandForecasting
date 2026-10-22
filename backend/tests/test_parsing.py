@@ -78,3 +78,13 @@ def test_rejects_missing_required_column():
 def test_rejects_non_excel_bytes():
     with pytest.raises(InputFileError):
         parse_input(b"SAP Code,By Principal\n1,2\n")
+
+def test_numeric_text_is_parsed():
+    data = make_workbook([["1001","Honesty","X"," 12 ","0"," 6 ","14.4","1,250.5","3","  7","1,000"] + ["1,250.5"]*12])
+    p = parse_input(data)
+    s = p.skus[0]
+    assert s.packing_size == 12 and s.moq == 0 and s.shelf_life_months == 6
+    assert s.lead_time_days == 14
+    assert s.sellable == 1250.5 and s.non_sellable == 3 and s.sit == 7 and s.mtd_sales == 1000
+    assert s.forecast["2026-10"] == 1250.5
+    assert p.warnings == []
