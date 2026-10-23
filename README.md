@@ -97,8 +97,6 @@ cd frontend && npm test
 
 `npm run build` type-checks and builds the frontend.
 
-If `npm test` fails with "Timeout waiting for worker to respond" (jsdom can load very slowly on some machines), run `npx vitest run --pool=threads` instead.
-
 ## Known limitations
 
 - **No order tracking.** The tool does not record which suggested orders were actually placed. Orders placed since the last upload only count once they appear in the input's `SIT Ctns (pending order)` column; until then a mid-month re-run will suggest them again.

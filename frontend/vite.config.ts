@@ -10,7 +10,9 @@ export default defineConfig({
     },
   },
   test: {
-    environment: 'jsdom',
+    // Current tests are pure logic. Component tests that need a DOM should
+    // opt in per file with `// @vitest-environment jsdom`.
+    environment: 'node',
     passWithNoTests: true,
   },
 })
