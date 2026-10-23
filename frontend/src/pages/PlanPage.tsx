@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ApiError, exportUrl, getRun, recalculate } from '../api'
 import FlagChips from '../components/FlagChips'
 import SkuDetail from '../components/SkuDetail'
 import { filterSkus, nextOrder } from '../lib/filters'
 import type { SkuFilter } from '../lib/filters'
-import { fmtDate, fmtQty } from '../lib/format'
+import { FLAG_LABELS, fmtDate, fmtQty } from '../lib/format'
 import type { FlagCode, RunRecord } from '../types'
 
 function errorText(err: unknown): string {
@@ -29,15 +29,24 @@ export default function PlanPage() {
   const [supplier, setSupplier] = useState<string | null>(null)
   const [flag, setFlag] = useState<FlagCode | null>(null)
   const [dueOn, setDueOn] = useState(true)
-  const [weeks, setWeeks] = useState(4)
+  const [weeks, setWeeks] = useState(4) // always a whole number 1..52
+  const [weeksText, setWeeksText] = useState('4')
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
 
+  // Id of the run currently shown; lets a slow recalculate response be ignored after navigation.
+  const currentRunId = useRef(runId)
+
   useEffect(() => {
     let cancelled = false
+    currentRunId.current = runId
     setRun(null)
     setError(null)
+    setBusy(false)
     setSelected(null)
+    setSupplier(null)
+    setFlag(null)
+    setSearch('')
     getRun(runId)
       .then((r) => {
         if (!cancelled) setRun(r)
@@ -52,7 +61,7 @@ export default function PlanPage() {
 
   const result = run?.result
   const planDate = result?.plan_date ?? ''
-  const windowWeeks = dueOn && weeks > 0 ? weeks : null
+  const windowWeeks = dueOn ? weeks : null
 
   const suppliers = useMemo(
     () => Array.from(new Set((result?.skus ?? []).map((s) => s.supplier))).sort((a, b) => a.localeCompare(b)),
@@ -79,12 +88,28 @@ export default function PlanPage() {
     setBusy(true)
     setError(null)
     try {
-      setRun(await recalculate(runId))
+      const fresh = await recalculate(runId)
+      if (currentRunId.current === runId) setRun(fresh)
     } catch (err) {
-      setError(errorText(err))
+      if (currentRunId.current === runId) setError(errorText(err))
     } finally {
-      setBusy(false)
+      if (currentRunId.current === runId) setBusy(false)
     }
+  }
+
+  function onCardClick(code: FlagCode) {
+    if (flag === code) {
+      setFlag(null)
+    } else {
+      setFlag(code)
+      setDueOn(false) // count cards cover SKUs with no order due, so show them all
+    }
+  }
+
+  function onWeeksChange(text: string) {
+    setWeeksText(text)
+    const n = Number(text)
+    if (text.trim() !== '' && Number.isInteger(n) && n >= 1 && n <= 52) setWeeks(n)
   }
 
   if (!run || !result) {
@@ -137,7 +162,7 @@ export default function PlanPage() {
           <button
             key={c.code}
             className={`count-card${flag === c.code ? ' active' : ''}`}
-            onClick={() => setFlag(flag === c.code ? null : c.code)}
+            onClick={() => onCardClick(c.code)}
             aria-pressed={flag === c.code}
           >
             <span className="count">{result.flag_counts[c.code] ?? 0}</span>
@@ -162,16 +187,11 @@ export default function PlanPage() {
           Flag{' '}
           <select value={flag ?? ''} onChange={(e) => setFlag((e.target.value || null) as FlagCode | null)}>
             <option value="">All flags</option>
-            {CARDS.map((c) => (
-              <option key={c.code} value={c.code}>
-                {c.label}
+            {(Object.keys(FLAG_LABELS) as FlagCode[]).map((code) => (
+              <option key={code} value={code}>
+                {FLAG_LABELS[code]}
               </option>
             ))}
-            <option value="EXPIRY_RISK">Expiry risk</option>
-            <option value="MTD_ABOVE_FORECAST">MTD above forecast</option>
-            <option value="LEAD_TIME_EXCEEDS_REORDER">Lead time ≥ reorder level</option>
-            <option value="MOQ_EXCEEDS_SHELF_LIFE">MOQ exceeds shelf life</option>
-            <option value="MISSING_LEAD_TIME">Missing lead time</option>
           </select>
         </label>
         <label>
@@ -181,8 +201,9 @@ export default function PlanPage() {
             type="number"
             min={1}
             max={52}
-            value={weeks}
-            onChange={(e) => setWeeks(Number(e.target.value))}
+            value={weeksText}
+            onChange={(e) => onWeeksChange(e.target.value)}
+            onBlur={() => setWeeksText(String(weeks))}
             style={{ width: '4.5rem' }}
           />{' '}
           weeks

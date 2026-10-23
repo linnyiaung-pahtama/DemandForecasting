@@ -1,4 +1,4 @@
-import type { FlagCode } from '../types'
+import type { FlagCode, PlannedOrder } from '../types'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
@@ -21,7 +21,7 @@ export function fmtDate(iso: string): string {
   return `${Number(day)} ${monthName} ${year}`
 }
 
-const FLAG_LABELS: Record<FlagCode, string> = {
+export const FLAG_LABELS: Record<FlagCode, string> = {
   ORDER_NOW: 'Order now',
   STOCKOUT_RISK: 'Stock-out risk',
   EXCESS: 'Excess stock',
@@ -35,4 +35,17 @@ const FLAG_LABELS: Record<FlagCode, string> = {
 
 export function flagLabel(code: FlagCode): string {
   return FLAG_LABELS[code]
+}
+
+/** The "why" for one order, built only from numbers the engine recorded. */
+export function orderReason(o: PlannedOrder): string {
+  const r = o.reason
+  let text =
+    `On ${fmtDate(o.order_date)} stock + on order = ${fmtQty(r.inventory_position)}, ` +
+    `below reorder level ${fmtQty(r.reorder_qty)}. ` +
+    `Ordering ${fmtQty(o.qty)} to reach target ${fmtQty(r.target_qty)}.`
+  if (r.moq_applied) text += ' (raised to MOQ)'
+  if (r.cap_applied) text += ` (capped by shelf life at ${fmtQty(r.shelf_life_cap ?? 0)})`
+  text += ` Expected stock when it arrives: ${fmtQty(r.stock_at_arrival)}.`
+  return text
 }

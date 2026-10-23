@@ -9,22 +9,9 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import type { PlannedOrder, SkuPlan } from '../types'
-import { fmtDate, fmtQty } from '../lib/format'
+import type { SkuPlan } from '../types'
+import { fmtDate, fmtQty, orderReason } from '../lib/format'
 import FlagChips from './FlagChips'
-
-/** The "why" for one order, built only from numbers the engine recorded. */
-function orderReason(o: PlannedOrder): string {
-  const r = o.reason
-  let text =
-    `On ${fmtDate(o.order_date)} stock + on order = ${fmtQty(r.inventory_position)}, ` +
-    `below reorder level ${fmtQty(r.reorder_qty)}. ` +
-    `Ordering ${fmtQty(o.qty)} to reach target ${fmtQty(r.target_qty)}.`
-  if (r.moq_applied) text += ' (raised to MOQ)'
-  if (r.cap_applied) text += ` (capped by shelf life at ${fmtQty(r.shelf_life_cap ?? 0)})`
-  text += ` Expected stock when it arrives: ${fmtQty(r.stock_at_arrival)}.`
-  return text
-}
 
 export default function SkuDetail({ sku, onClose }: { sku: SkuPlan; onClose: () => void }) {
   const data = sku.weeks.map((w) => ({
