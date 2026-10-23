@@ -48,7 +48,12 @@ def plan_sku(sku: SkuInput, actuals: dict[str, float], actual_months: list[str],
         status = SkuStatus.NO_ORDER_NEEDED
 
     lead = sku.lead_time_days
-    next_calc_date = plan_date + timedelta(days=lead) if lead is not None and lead >= 0 else None
+    next_calc_date = None
+    if lead is not None and lead >= 0:
+        try:
+            next_calc_date = plan_date + timedelta(days=lead)
+        except OverflowError:  # absurd lead time: no representable date
+            next_calc_date = None
 
     return SkuResult(
         sap_code=sku.sap_code, supplier=sku.supplier, description=sku.description,

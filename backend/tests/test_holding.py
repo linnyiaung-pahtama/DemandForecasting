@@ -72,6 +72,26 @@ def test_missing_lead_time_has_no_next_date():
     assert run(lead=-3).next_calc_date is None
 
 
+def test_huge_lead_time_does_not_crash():
+    r = run(lead=4_000_000)
+    assert r.next_calc_date is None and r.order_qty == 150
+
+
+def test_boundaries_and_fractional_holding():
+    # required == MOQ is not "MOQ applied"
+    r = run(moq=100)
+    assert r.required == 100 and r.order_qty == 100 and not r.moq_applied
+    # target - available exactly 100
+    r = run(sellable=200, sit=60, moq=0)
+    assert r.target - r.available == pytest.approx(100) and r.required == 100
+    # fractional holding: 120 * 2.5 = 300, minus 260 available
+    r = run(holding=2.5, moq=0)
+    assert r.target == pytest.approx(300) and r.required == 40 and r.holding_months == 2.5
+    # zero forecast is flagged even when the holding is missing
+    r = run(fc=(0, 0, 0), holding=None)
+    assert r.zero_forecast and r.status == SkuStatus.HOLDING_NOT_SET
+
+
 def test_validate_plan_date_range():
     from app.parsing import parse_input
     from tests.test_parsing import SAMPLE

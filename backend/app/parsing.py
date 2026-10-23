@@ -207,8 +207,12 @@ def parse_input(data: bytes) -> ParsedInput:
                                          message="non-numeric shelf life treated as unknown (no cap)"))
 
         lead_num = _to_number(cell(c_lead))
-        if lead_num is not None:
-            lead: int | None = int(round(lead_num))
+        if lead_num is not None and lead_num < 0:
+            lead: int | None = None
+            warnings.append(ParseWarning(sap_code=sap, column=h_lead,
+                                         message="negative lead time treated as missing"))
+        elif lead_num is not None:
+            lead = int(round(lead_num))
         else:
             lead = None
             warnings.append(ParseWarning(sap_code=sap, column=h_lead,

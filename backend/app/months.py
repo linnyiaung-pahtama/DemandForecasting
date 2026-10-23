@@ -1,5 +1,5 @@
 """Helpers for "YYYY-MM" month keys."""
-from datetime import date
+_MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
 def _index(key: str) -> int:
@@ -26,4 +26,4 @@ def next_months(key: str, n: int) -> list[str]:
 def month_label(key: str) -> str:
     """"2026-07" -> "Jul 2026"."""
     year, month = key.split("-")
-    return f"{date(int(year), int(month), 1):%b} {year}"
+    return f"{_MONTH_ABBR[int(month) - 1]} {year}"

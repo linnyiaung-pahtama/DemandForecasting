@@ -61,6 +61,12 @@ def test_missing_lead_time_is_none_with_warning():
     assert p.skus[0].lead_time_days is None
     assert any(w.column == "Lead Time" for w in p.warnings)
 
+def test_negative_lead_time_is_none_with_warning():
+    data = make_workbook([["1001","Honesty","X",12,0,6,-5,10,0,0,5] + [10]*12])
+    p = parse_input(data)
+    assert p.skus[0].lead_time_days is None
+    assert any(w.column == "Lead Time" and "negative lead time" in w.message for w in p.warnings)
+
 def test_duplicate_sap_code_keeps_first_with_warning():
     row = ["1001","Honesty","X",12,0,6,14,10,0,0,5] + [10]*12
     p = parse_input(make_workbook([row, row]))
