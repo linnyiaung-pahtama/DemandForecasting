@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { errorText, getSettings, listRuns, recalculate, saveSettings } from '../api'
-import { validateSetting } from '../lib/settings'
+import { changedSettings, validateSetting } from '../lib/settings'
 import type { SupplierSettingView } from '../types'
 
 interface Draft {
@@ -60,25 +60,32 @@ export default function SettingsPage() {
 
   const hasErrors = Object.values(checks).some((c) => c.errors.length > 0)
 
+  // Only rows the planner changed are saved, so untouched defaults stay flagged as unreviewed.
+  const changes = useMemo(
+    () =>
+      changedSettings(
+        rows ?? [],
+        (rows ?? []).map((r) => ({
+          supplier: r.supplier,
+          reorder_days: Number(drafts[r.supplier]?.reorder ?? r.reorder_days),
+          target_days: Number(drafts[r.supplier]?.target ?? r.target_days),
+        })),
+      ),
+    [rows, drafts],
+  )
+
   function edit(supplier: string, field: keyof Draft, value: string) {
     setDrafts((prev) => ({ ...prev, [supplier]: { ...prev[supplier], [field]: value } }))
     setSaved(null)
   }
 
   async function onSave() {
-    if (!rows) return
+    if (!rows || changes.length === 0) return
     setSaving(true)
     setSaveError(null)
     setSaved(null)
     try {
-      const fresh = await saveSettings(
-        rows.map((r) => ({
-          supplier: r.supplier,
-          reorder_days: Number(drafts[r.supplier].reorder),
-          target_days: Number(drafts[r.supplier].target),
-          is_default: false,
-        })),
-      )
+      const fresh = await saveSettings(changes)
       setRows(fresh)
       setDrafts(toDrafts(fresh))
       let latest
@@ -194,10 +201,18 @@ export default function SettingsPage() {
           </div>
 
           <div className="save-bar">
-            <button className="primary" onClick={onSave} disabled={hasErrors || saving}>
+            <button
+              className="primary"
+              onClick={onSave}
+              disabled={hasErrors || saving || changes.length === 0}
+            >
               {saving ? 'Saving…' : 'Save'}
             </button>
-            {hasErrors && <span className="muted">Fix the errors above to save.</span>}
+            {hasErrors ? (
+              <span className="muted">Fix the errors above to save.</span>
+            ) : (
+              changes.length === 0 && !saving && <span className="muted">No changes to save.</span>
+            )}
           </div>
         </>
       )}

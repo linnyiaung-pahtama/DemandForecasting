@@ -1,3 +1,5 @@
+import type { SupplierSetting, SupplierSettingView } from '../types'
+
 export interface SettingValidation {
   errors: string[]
   warnings: string[]
@@ -27,4 +29,29 @@ export function validateSetting(
     )
   }
   return { errors, warnings }
+}
+
+/**
+ * The rows whose reorder or target level differs from the loaded value, as settings to save.
+ * Untouched rows are left out so a default row stays a default (and highlighted) until it is edited.
+ */
+export function changedSettings(
+  original: SupplierSettingView[],
+  edited: { supplier: string; reorder_days: number; target_days: number }[],
+): SupplierSetting[] {
+  const byName = new Map(original.map((o) => [o.supplier, o]))
+  const out: SupplierSetting[] = []
+  for (const e of edited) {
+    const o = byName.get(e.supplier)
+    if (!o) continue
+    if (e.reorder_days !== o.reorder_days || e.target_days !== o.target_days) {
+      out.push({
+        supplier: e.supplier,
+        reorder_days: e.reorder_days,
+        target_days: e.target_days,
+        is_default: false,
+      })
+    }
+  }
+  return out
 }
