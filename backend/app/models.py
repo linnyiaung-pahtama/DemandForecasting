@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -166,3 +167,41 @@ class InspectResponse(BaseModel):
     min_plan_date: date
     max_plan_date: date
     warnings: list[ParseWarning]
+
+
+class SkuStatus(str, Enum):
+    TO_ORDER = "TO_ORDER"
+    NO_ORDER_NEEDED = "NO_ORDER_NEEDED"
+    HOLDING_NOT_SET = "HOLDING_NOT_SET"
+    NO_DEMAND_DATA = "NO_DEMAND_DATA"
+
+
+class DemandValue(BaseModel):
+    month: str  # "YYYY-MM"
+    source: Literal["actual", "forecast"]
+    value: float | None
+    valid: bool
+
+
+class SkuResult(BaseModel):
+    sap_code: str
+    supplier: str
+    description: str
+    packing_size: float | None
+    lead_time_days: int | None
+    moq: float
+    sellable: float
+    sit: float
+    available: float
+    demand_values: list[DemandValue]  # actuals then forecasts, oldest first
+    valid_count: int
+    buffer: float | None
+    holding_months: float | None
+    target: float | None
+    required: int | None
+    order_qty: int | None
+    moq_applied: bool
+    stock_cover_months: float | None
+    next_calc_date: date | None
+    status: SkuStatus
+    zero_forecast: bool
