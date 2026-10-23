@@ -1,17 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ApiError, exportUrl, getRun, recalculate } from '../api'
+import { errorText, exportUrl, getRun, recalculate } from '../api'
 import FlagChips from '../components/FlagChips'
 import SkuDetail from '../components/SkuDetail'
 import { filterSkus, nextOrder } from '../lib/filters'
 import type { SkuFilter } from '../lib/filters'
 import { FLAG_LABELS, fmtDate, fmtQty } from '../lib/format'
+import { useWeeksInput } from '../lib/useWeeksInput'
 import type { FlagCode, RunRecord } from '../types'
-
-function errorText(err: unknown): string {
-  if (err instanceof ApiError) return err.detail
-  return err instanceof Error ? err.message : String(err)
-}
 
 const CARDS: { code: FlagCode; label: string }[] = [
   { code: 'ORDER_NOW', label: 'Order now' },
@@ -29,8 +25,7 @@ export default function PlanPage() {
   const [supplier, setSupplier] = useState<string | null>(null)
   const [flag, setFlag] = useState<FlagCode | null>(null)
   const [dueOn, setDueOn] = useState(true)
-  const [weeks, setWeeks] = useState(4) // always a whole number 1..52
-  const [weeksText, setWeeksText] = useState('4')
+  const { weeks, inputProps: weeksInputProps } = useWeeksInput(4)
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
 
@@ -104,12 +99,6 @@ export default function PlanPage() {
       setFlag(code)
       setDueOn(false) // count cards cover SKUs with no order due, so show them all
     }
-  }
-
-  function onWeeksChange(text: string) {
-    setWeeksText(text)
-    const n = Number(text)
-    if (text.trim() !== '' && Number.isInteger(n) && n >= 1 && n <= 52) setWeeks(n)
   }
 
   if (!run || !result) {
@@ -201,9 +190,7 @@ export default function PlanPage() {
             type="number"
             min={1}
             max={52}
-            value={weeksText}
-            onChange={(e) => onWeeksChange(e.target.value)}
-            onBlur={() => setWeeksText(String(weeks))}
+            {...weeksInputProps}
             style={{ width: '4.5rem' }}
           />{' '}
           weeks

@@ -1,14 +1,9 @@
 import { useState } from 'react'
 import type { ChangeEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ApiError, createRun, inspectFile } from '../api'
+import { createRun, errorText, inspectFile } from '../api'
 import { fmtDate } from '../lib/format'
 import type { InspectResponse } from '../types'
-
-function errorText(err: unknown): string {
-  if (err instanceof ApiError) return err.detail
-  return err instanceof Error ? err.message : String(err)
-}
 
 export default function UploadPage() {
   const navigate = useNavigate()

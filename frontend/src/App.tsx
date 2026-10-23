@@ -1,16 +1,9 @@
-import { BrowserRouter, NavLink, Route, Routes, useParams } from 'react-router-dom'
+import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom'
+import HistoryPage from './pages/HistoryPage'
 import PlanPage from './pages/PlanPage'
+import SettingsPage from './pages/SettingsPage'
+import SupplierPage from './pages/SupplierPage'
 import UploadPage from './pages/UploadPage'
-
-function Placeholder({ title }: { title: string }) {
-  const { id } = useParams()
-  return (
-    <div className="card">
-      <h2>{title}</h2>
-      <p className="muted">{id ? `Run ${id}: ` : ''}This page is not built yet.</p>
-    </div>
-  )
-}
 
 export default function App() {
   return (
@@ -27,9 +20,9 @@ export default function App() {
         <Routes>
           <Route path="/" element={<UploadPage />} />
           <Route path="/runs/:id" element={<PlanPage />} />
-          <Route path="/runs/:id/suppliers" element={<Placeholder title="Supplier summary" />} />
-          <Route path="/settings" element={<Placeholder title="Supplier settings" />} />
-          <Route path="/history" element={<Placeholder title="Run history" />} />
+          <Route path="/runs/:id/suppliers" element={<SupplierPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/history" element={<HistoryPage />} />
         </Routes>
       </main>
     </BrowserRouter>

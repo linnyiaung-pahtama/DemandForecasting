@@ -49,3 +49,19 @@ export function orderReason(o: PlannedOrder): string {
   text += ` Expected stock when it arrives: ${fmtQty(r.stock_at_arrival)}.`
   return text
 }
+
+const SEVERE: FlagCode[] = ['ORDER_NOW', 'STOCKOUT_RISK']
+const WARN: FlagCode[] = [
+  'EXCESS',
+  'EXPIRY_RISK',
+  'LEAD_TIME_EXCEEDS_REORDER',
+  'MOQ_EXCEEDS_SHELF_LIFE',
+  'MISSING_LEAD_TIME',
+]
+
+/** CSS class for a flag chip: red for urgent, amber for warnings, grey otherwise. */
+export function flagTone(code: FlagCode): string {
+  if (SEVERE.includes(code)) return 'chip-red'
+  if (WARN.includes(code)) return 'chip-amber'
+  return 'chip-grey'
+}

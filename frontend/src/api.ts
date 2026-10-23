@@ -41,6 +41,11 @@ function detailText(detail: unknown, fallback: string): string {
   return fallback
 }
 
+export function errorText(err: unknown): string {
+  if (err instanceof ApiError) return err.detail
+  return err instanceof Error ? err.message : String(err)
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   let response: Response
   try {
