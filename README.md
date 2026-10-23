@@ -50,7 +50,7 @@ Then open http://localhost:5173. The frontend forwards `/api` requests to the ba
 
 ## Using it
 
-1. **New plan**: choose the input workbook, check the detected plan date and any warnings, then run.
+1. **New plan**: choose the input workbook, check the detected plan date and any warnings, then click Calculate.
 2. **Order plan**: filter by supplier, flag or weeks ahead; click a SKU to see its projection and why each order is suggested. The supplier summary is reached from this page.
 3. **Supplier settings**: reorder and target days per supplier. Saving re-runs the plan for the current upload. New suppliers start at 20 / 30 days and are flagged until you review them.
 4. **History**: reopen a past run exactly as it was calculated.
@@ -88,14 +88,20 @@ $env:ORDERPLAN_DB = "C:\path\to\other.db"      # PowerShell
 export ORDERPLAN_DB=C:/path/to/other.db         # Git Bash
 ```
 
+The `$env:` setting applies only to the current PowerShell window. Starting the app from the Claude launch configuration (`.claude/launch.json`) always uses the default database.
+
 ## Tests
 
+PowerShell or Git Bash, from the project folder:
+
 ```
-cd backend && .venv/Scripts/python -m pytest
-cd frontend && npm test
+cd backend
+.venv/Scripts/python -m pytest
+cd ..
+npm --prefix frontend test
 ```
 
-`npm run build` type-checks and builds the frontend.
+`npm --prefix frontend run build` type-checks and builds the frontend.
 
 ## Known limitations
 
