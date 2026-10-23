@@ -1,4 +1,5 @@
 import { BrowserRouter, NavLink, Route, Routes, useParams } from 'react-router-dom'
+import PlanPage from './pages/PlanPage'
 import UploadPage from './pages/UploadPage'
 
 function Placeholder({ title }: { title: string }) {
@@ -25,7 +26,7 @@ export default function App() {
       <main className="page">
         <Routes>
           <Route path="/" element={<UploadPage />} />
-          <Route path="/runs/:id" element={<Placeholder title="Order plan" />} />
+          <Route path="/runs/:id" element={<PlanPage />} />
           <Route path="/runs/:id/suppliers" element={<Placeholder title="Supplier summary" />} />
           <Route path="/settings" element={<Placeholder title="Supplier settings" />} />
           <Route path="/history" element={<Placeholder title="Run history" />} />
