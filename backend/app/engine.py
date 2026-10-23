@@ -119,7 +119,7 @@ def plan_sku(sku: SkuInput, setting: SupplierSetting, demand: DemandSeries,
     if stockout_qty > 0:
         flags.append(Flag(
             code=FlagCode.STOCKOUT_RISK,
-            message=(f"Stock runs out on {first_stockout_date.isoformat()}: "
+            message=(f"Stock runs out on {first_stockout_date.day} {first_stockout_date:%b %Y}: "
                      f"{stockout_days} days short, about {math.ceil(stockout_qty)} cartons of sales lost.")))
     if moq_exceeds_shelf:
         flags.append(Flag(
@@ -148,7 +148,7 @@ def plan_sku(sku: SkuInput, setting: SupplierSetting, demand: DemandSeries,
         flags.append(Flag(
             code=FlagCode.NO_FORECAST_HOLDING_STOCK,
             message="No forecast demand, but the SKU is holding stock."))
-    if sku.mtd_sales > current_month_forecast > 0:
+    if sku.mtd_sales > 0 and sku.mtd_sales > max(current_month_forecast, 0.0):
         flags.append(Flag(
             code=FlagCode.MTD_ABOVE_FORECAST,
             message=(f"Sales so far this month ({sku.mtd_sales:g}) already exceed the month's "
@@ -170,19 +170,26 @@ def plan_sku(sku: SkuInput, setting: SupplierSetting, demand: DemandSeries,
 
 
 def plan_date_bounds(parsed: ParsedInput) -> tuple[date, date]:
-    """Earliest and latest allowed plan date: the day after MTD end to the last forecast month's end."""
-    year, mon = (int(p) for p in parsed.forecast_months[-1].split("-"))
-    last = date(year, mon, calendar.monthrange(year, mon)[1])
-    return parsed.mtd_end + timedelta(days=1), last
+    """Earliest and latest allowed plan date.
+
+    Stock is as of the MTD end, so the plan starts the day after it and no later than the end of
+    the MTD month (a later start would drop the demand in between). If the MTD ends on the last
+    day of its month, the next day is the only allowed date.
+    """
+    earliest = parsed.mtd_end + timedelta(days=1)
+    year, mon = parsed.mtd_end.year, parsed.mtd_end.month
+    month_end = date(year, mon, calendar.monthrange(year, mon)[1])
+    return earliest, max(month_end, earliest)
 
 
 def validate_plan_date(parsed: ParsedInput, plan_date: date) -> None:
-    """Plan date must be after the MTD end and within the forecast months."""
+    """Plan date must be after the MTD end and within the MTD month."""
     earliest, last = plan_date_bounds(parsed)
     if plan_date < earliest or plan_date > last:
         raise ValueError(
             f"Plan date {plan_date.isoformat()} is outside the allowed range: "
-            f"{earliest.isoformat()} to {last.isoformat()}.")
+            f"{earliest.isoformat()} to {last.isoformat()}. Stock figures are as of the MTD end "
+            f"({parsed.mtd_end.isoformat()}), so the plan date can be at most the end of that month.")
 
 
 def plan_all(parsed: ParsedInput, settings: dict[str, SupplierSetting],

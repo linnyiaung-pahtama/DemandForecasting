@@ -17,7 +17,7 @@ def test_inspect_reports_counts_and_dates(client):
     r = upload(client, "/api/inspect").json()
     assert r["sku_count"] == 212 and r["supplier_count"] == 17
     assert r["default_plan_date"] == "2026-10-12" and r["min_plan_date"] == "2026-10-12"
-    assert r["max_plan_date"] == "2027-09-30"
+    assert r["max_plan_date"] == "2026-10-31" and r["mtd_end"] == "2026-10-11"
 
 def test_create_run_then_fetch_and_list(client):
     run = upload(client).json()
@@ -59,10 +59,10 @@ def test_recalculate_unknown_run_returns_404(client):
     assert client.post("/api/runs/999/recalculate").status_code == 404
 
 def test_recalculate_keeps_plan_date(client):
-    run = upload(client, plan_date="2026-11-02").json()
+    run = upload(client, plan_date="2026-10-20").json()
     rec = client.post(f"/api/runs/{run['id']}/recalculate").json()
-    assert rec["plan_date"] == "2026-11-02" and rec["result"]["plan_date"] == "2026-11-02"
-    assert client.get("/api/runs").json()[0]["plan_date"] == "2026-11-02"
+    assert rec["plan_date"] == "2026-10-20" and rec["result"]["plan_date"] == "2026-10-20"
+    assert client.get("/api/runs").json()[0]["plan_date"] == "2026-10-20"
 
 def test_upload_wrong_file_returns_400(client):
     r = client.post("/api/runs", files={"file": ("old.xlsb", b"not a workbook")})
@@ -73,7 +73,9 @@ def test_upload_wrong_file_returns_400(client):
 def test_plan_date_outside_allowed_range_returns_422(client):
     assert upload(client, plan_date="2026-10-05").status_code == 422
     assert upload(client, plan_date="2027-10-01").status_code == 422
-    assert upload(client, plan_date="2026-11-02").status_code == 200
+    assert upload(client, plan_date="2026-10-31").status_code == 200
+    r = upload(client, plan_date="2026-11-02")
+    assert r.status_code == 422 and "2026-10-31" in r.text and "MTD end" in r.text
 
 def test_invalid_plan_date_text_returns_422(client):
     assert upload(client, plan_date="not-a-date").status_code == 422

@@ -68,7 +68,7 @@ def create_app(db_path: Path = config.DB_PATH) -> FastAPI:
             file_name=file.filename or "", sku_count=len(parsed.skus),
             supplier_count=len({s.supplier for s in parsed.skus}),
             forecast_months=parsed.forecast_months, mtd_label=parsed.mtd_label,
-            default_plan_date=parsed.default_plan_date,
+            mtd_end=parsed.mtd_end, default_plan_date=parsed.default_plan_date,
             min_plan_date=min_date, max_plan_date=max_date, warnings=parsed.warnings)
 
     @app.post("/api/runs", response_model=RunRecord)

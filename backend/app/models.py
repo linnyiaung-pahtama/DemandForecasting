@@ -161,6 +161,7 @@ class InspectResponse(BaseModel):
     supplier_count: int
     forecast_months: list[str]
     mtd_label: str
+    mtd_end: date
     default_plan_date: date
     min_plan_date: date
     max_plan_date: date

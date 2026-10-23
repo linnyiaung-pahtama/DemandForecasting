@@ -74,10 +74,10 @@ Columns it expects:
 | `Total Sellable (Ctns)` | Sellable stock on hand |
 | `Total Non-Sellable (Ctns)` | Shown only, not used in the calculation |
 | `SIT Ctns (pending order)` | Stock in transit / already ordered |
-| `Oct'26  MTD Sale (1-11 Oct)` | Sales so far this month; the header's date range sets the plan date (the day after) |
-| `2026 Oct IMS` ... `2027 Sep IMS` | Monthly forecast in cartons, 12 months |
+| `Oct'26  MTD Sale (1-11 Oct)` | Sales so far this month; the header's date range sets the stock date (MTD end). The default plan date is the day after, and the plan date can be at most the end of that month |
+| `2026 Oct IMS` ... `2027 Sep IMS` | Monthly forecast in cartons, 12 months; must be consecutive and start no later than the MTD month (month names may be full, 3 or 4 letters, e.g. `Sept`) |
 
-A missing `Data` sheet or required column rejects the file with a message. Per-row problems (non-numeric values, negative month-to-date sales, missing lead time) are kept and shown as warnings; nothing is cleaned silently.
+A missing `Data` sheet or required column, forecast months with a gap, or a forecast that starts after the MTD month rejects the file with a message. Per-row problems (non-numeric values, negative month-to-date sales, negative forecast, zero or negative shelf life, missing lead time) and unrecognised `IMS` headers are kept and shown as warnings; nothing is cleaned silently.
 
 ## Database
 

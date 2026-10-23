@@ -20,11 +20,11 @@ REQUIRED_COLUMNS = [
     "SIT Ctns (pending order)",
 ]
 
-MONTHS = {m: i for i, m in enumerate(
-    ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], start=1)}
+MONTH_NAMES = ["january", "february", "march", "april", "may", "june", "july", "august",
+               "september", "october", "november", "december"]
 
-MTD_RE = re.compile(r"^([a-z]{3})'(\d{2}) mtd sale \((\d{1,2})-(\d{1,2}) ([a-z]{3})\)$")
-FORECAST_RE = re.compile(r"^(\d{4}) ([a-z]{3}) ims$")
+MTD_RE = re.compile(r"^([a-z]+)'(\d{2}) mtd sale \((\d{1,2})-(\d{1,2}) ([a-z]+)\)$")
+FORECAST_RE = re.compile(r"^(\d{4}) ([a-z]+) ims$")
 HEADER_SEARCH_ROWS = 10
 
 
@@ -33,7 +33,23 @@ def _collapse(value) -> str:
 
 
 def _norm(value) -> str:
-    return _collapse(value).casefold()
+    # curly apostrophes (as typed by Excel autocorrect) are matched as plain ones
+    return _collapse(value).replace("’", "'").replace("‘", "'").casefold()
+
+
+def _month_number(word: str) -> int | None:
+    """1-12 for a month name or abbreviation of at least 3 letters (Oct, Sept, June, September)."""
+    if len(word) < 3:
+        return None
+    for i, name in enumerate(MONTH_NAMES, start=1):
+        if name.startswith(word):
+            return i
+    return None
+
+
+def _next_month(key: str) -> str:
+    year, mon = int(key[:4]), int(key[5:])
+    return f"{year + (mon == 12):04d}-{mon % 12 + 1:02d}"
 
 
 def _is_number(v) -> bool:
@@ -91,7 +107,7 @@ def parse_input(data: bytes) -> ParsedInput:
         )
     mtd_norm, (mtd_col, mtd_label) = mtd_cols[0]
     m = MTD_RE.match(mtd_norm)
-    mtd_mon = MONTHS.get(m.group(1))
+    mtd_mon = _month_number(m.group(1))
     if mtd_mon is None:
         raise InputFileError(f"Unrecognised month in MTD column header: {mtd_label}.")
     try:
@@ -101,17 +117,34 @@ def parse_input(data: bytes) -> ParsedInput:
     mtd_month = f"{mtd_end.year:04d}-{mtd_end.month:02d}"
 
     forecast_cols: list[tuple[str, int, str]] = []  # (YYYY-MM, column index, header text)
+    warnings: list[ParseWarning] = []
     for n, (i, text) in columns.items():
         fm = FORECAST_RE.match(n)
         if not fm:
+            if "ims" in n:
+                warnings.append(ParseWarning(
+                    sap_code=None, column=text,
+                    message="header looks like a forecast column but does not match the expected "
+                            "pattern (e.g. '2026 Oct IMS'); column ignored"))
             continue
-        mon = MONTHS.get(fm.group(2))
+        mon = _month_number(fm.group(2))
         if mon is None:
             raise InputFileError(f"Unrecognised month in forecast column header: {text}.")
         forecast_cols.append((f"{int(fm.group(1)):04d}-{mon:02d}", i, text))
     if not forecast_cols:
         raise InputFileError("No forecast columns found (expected headers like '2026 Oct IMS').")
     forecast_cols.sort()
+    for (prev, _, _), (cur, _, cur_text) in zip(forecast_cols, forecast_cols[1:]):
+        if cur == prev:
+            raise InputFileError(f"Forecast month {cur} appears in more than one column ({cur_text}).")
+        expected = _next_month(prev)
+        if cur != expected:
+            raise InputFileError(
+                f"Forecast months must be consecutive; {expected} is missing between {prev} and {cur}.")
+    if forecast_cols[0][0] > mtd_month:
+        raise InputFileError(
+            f"The first forecast month ({forecast_cols[0][0]}) is later than the MTD month "
+            f"({mtd_month}); the forecast must start no later than the MTD month.")
 
     def col(name: str) -> tuple[int, str]:
         return columns[_norm(name)]
@@ -128,7 +161,6 @@ def parse_input(data: bytes) -> ParsedInput:
     c_sit, h_sit = col("SIT Ctns (pending order)")
 
     skus: list[SkuInput] = []
-    warnings: list[ParseWarning] = []
     seen: set[str] = set()
 
     for row in rows[header_idx + 1:]:
@@ -163,9 +195,11 @@ def parse_input(data: bytes) -> ParsedInput:
         shelf_num = _to_number(shelf_raw)
         shelf: float | None = None
         if shelf_num is not None:
-            if shelf_num == 0:
-                warnings.append(ParseWarning(sap_code=sap, column=h_shelf,
-                                             message="shelf life 0 treated as unknown (no cap)"))
+            if shelf_num <= 0:
+                warnings.append(ParseWarning(
+                    sap_code=sap, column=h_shelf,
+                    message=("shelf life 0 treated as unknown (no cap)" if shelf_num == 0
+                             else "negative shelf life treated as unknown (no cap)")))
             else:
                 shelf = shelf_num
         elif shelf_raw is not None and _collapse(shelf_raw) not in ("", "-"):
@@ -185,6 +219,15 @@ def parse_input(data: bytes) -> ParsedInput:
             warnings.append(ParseWarning(sap_code=sap, column=mtd_label,
                                          message="negative MTD sales (returns) treated as 0"))
 
+        forecast: dict[str, float] = {}
+        for key, i, text in forecast_cols:
+            fc = num(i, text)
+            if fc < 0:
+                warnings.append(ParseWarning(sap_code=sap, column=text,
+                                             message="negative forecast treated as 0"))
+                fc = 0.0
+            forecast[key] = fc
+
         skus.append(SkuInput(
             sap_code=sap,
             supplier=_collapse(cell(c_sup)),
@@ -197,7 +240,7 @@ def parse_input(data: bytes) -> ParsedInput:
             non_sellable=num(c_non, h_non),
             sit=num(c_sit, h_sit),
             mtd_sales=mtd,
-            forecast={key: num(i, text) for key, i, text in forecast_cols},
+            forecast=forecast,
         ))
 
     return ParsedInput(

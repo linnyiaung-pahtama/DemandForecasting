@@ -130,14 +130,17 @@ def test_validate_plan_date_range():
     parsed = parse_input(SAMPLE.read_bytes())
     validate_plan_date(parsed, date(2026, 10, 12))
     with pytest.raises(ValueError): validate_plan_date(parsed, date(2026, 10, 11))
+    validate_plan_date(parsed, date(2026, 10, 31))   # last day of the MTD month
+    with pytest.raises(ValueError, match="MTD end"): validate_plan_date(parsed, date(2026, 11, 1))
     with pytest.raises(ValueError): validate_plan_date(parsed, date(2027, 10, 1))
 
 
 def test_flag_boundaries_do_not_fire():
-    # MTD flag needs mtd > month forecast > 0
+    # MTD flag: mtd > 0 and mtd > the month forecast (a zero forecast counts as 0)
     assert FlagCode.MTD_ABOVE_FORECAST in codes(run(1000, mtd=101, month_fc=100))
     assert FlagCode.MTD_ABOVE_FORECAST not in codes(run(1000, mtd=100, month_fc=100))
-    assert FlagCode.MTD_ABOVE_FORECAST not in codes(run(1000, mtd=50, month_fc=0.0))
+    assert FlagCode.MTD_ABOVE_FORECAST in codes(run(1000, mtd=50, month_fc=0.0))
+    assert FlagCode.MTD_ABOVE_FORECAST not in codes(run(1000, mtd=0, month_fc=0.0))
     # expiry risk: shelf 1 month = 30 days, cover = 300 cartons at 10/day
     assert FlagCode.EXPIRY_RISK in codes(run(301, shelf=1))
     assert FlagCode.EXPIRY_RISK not in codes(run(300, shelf=1))
@@ -145,3 +148,46 @@ def test_flag_boundaries_do_not_fire():
     # lead time just below the reorder level
     assert FlagCode.LEAD_TIME_EXCEEDS_REORDER not in codes(run(1000, lt=19, reorder=20))
     assert FlagCode.LEAD_TIME_EXCEEDS_REORDER in codes(run(1000, lt=20, reorder=20))
+
+
+def test_plan_date_bounds_end_at_mtd_month_end():
+    from app.engine import plan_date_bounds
+    from app.parsing import parse_input
+    from tests.test_parsing import SAMPLE
+    assert plan_date_bounds(parse_input(SAMPLE.read_bytes())) == (date(2026, 10, 12), date(2026, 10, 31))
+
+
+def test_plan_date_bounds_when_mtd_ends_on_month_end():
+    from app.engine import plan_date_bounds, validate_plan_date
+    from app.parsing import parse_input
+    from tests.helpers import DEFAULT_HEADERS, make_workbook
+    headers = ["Oct'26 MTD Sale (1-31 Oct)" if "MTD" in h else h for h in DEFAULT_HEADERS]
+    parsed = parse_input(make_workbook([["1001", "S", "X", 12, 0, 6, 7, 10, 0, 0, 5] + [10] * 12], headers=headers))
+    assert plan_date_bounds(parsed) == (date(2026, 11, 1), date(2026, 11, 1))
+    validate_plan_date(parsed, date(2026, 11, 1))
+
+
+def test_plan_date_on_month_boundary_keeps_remaining_month_demand():
+    from app.engine import plan_all
+    from app.parsing import parse_input
+    from tests.helpers import make_workbook
+    parsed = parse_input(make_workbook([["1001", "S", "X", 12, 0, 6, 7, 10, 0, 0, 100] + [310] * 12]))
+    r = plan_all(parsed, {}, date(2026, 10, 31))
+    # Oct forecast 310, MTD 100: the 210 left falls on the single remaining day
+    assert r.skus[0].weeks[0].demand == pytest.approx(210 + 6 * 310 / 30)
+
+
+def test_mtd_above_forecast_flag_with_zero_forecast_in_sample_file():
+    from app.engine import plan_all
+    from app.parsing import parse_input
+    from tests.test_parsing import SAMPLE
+    parsed = parse_input(SAMPLE.read_bytes())
+    r = plan_all(parsed, {}, parsed.default_plan_date)
+    sku = next(s for s in r.skus if s.sap_code == "127904330029")
+    assert FlagCode.MTD_ABOVE_FORECAST in {f.code for f in sku.flags}
+
+
+def test_stockout_message_uses_readable_date():
+    p = run(50, lt=14)
+    msg = next(f.message for f in p.flags if f.code == FlagCode.STOCKOUT_RISK)
+    assert "17 Oct 2026" in msg and "2026-10-17" not in msg

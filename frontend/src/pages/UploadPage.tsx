@@ -104,6 +104,10 @@ export default function UploadPage() {
               Detected {fmtDate(info.default_plan_date)}. Allowed {fmtDate(info.min_plan_date)} to{' '}
               {fmtDate(info.max_plan_date)}.
             </span>
+            <span className="muted">
+              Stock figures are as of {fmtDate(info.mtd_end)}; the plan date can be up to the end of that
+              month.
+            </span>
           </div>
 
           <details className="warnings">

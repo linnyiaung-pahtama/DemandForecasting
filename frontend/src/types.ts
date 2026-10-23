@@ -153,6 +153,7 @@ export interface InspectResponse {
   supplier_count: number
   forecast_months: string[]
   mtd_label: string
+  mtd_end: string
   default_plan_date: string
   min_plan_date: string
   max_plan_date: string

@@ -127,7 +127,7 @@ export default function PlanPage() {
           <button onClick={onRecalculate} disabled={busy}>
             {busy ? 'Recalculating…' : 'Recalculate with current settings'}
           </button>
-          <a className="btn primary" href={exportUrl(runId, windowWeeks ?? 4)}>
+          <a className="btn primary" href={exportUrl(runId, weeks)}>
             Export to Excel
           </a>
         </div>

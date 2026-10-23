@@ -88,3 +88,64 @@ def test_numeric_text_is_parsed():
     assert s.sellable == 1250.5 and s.non_sellable == 3 and s.sit == 7 and s.mtd_sales == 1000
     assert s.forecast["2026-10"] == 1250.5
     assert p.warnings == []
+
+
+# ---- header handling and value cleaning ------------------------------------------------------
+
+ROW = ["1001", "Honesty", "X", 12, 0, 6, 14, 10, 0, 0, 5]
+BASE = ["SAP Code", "By Principal", "Description", "Packing Size", "MOQ", "Shelf Life month", "Lead Time",
+        "Total Sellable (Ctns)", "Total Non-Sellable (Ctns)", "SIT Ctns (pending order)"]
+
+
+def test_forecast_gap_is_rejected():
+    headers = BASE + ["Oct'26 MTD Sale (1-11 Oct)", "2026 Oct IMS", "2026 Dec IMS"]
+    with pytest.raises(InputFileError, match=r"consecutive.*2026-11.*2026-10.*2026-12"):
+        parse_input(make_workbook([ROW + [10, 10]], headers=headers))
+
+
+def test_forecast_starting_after_mtd_month_is_rejected():
+    headers = BASE + ["Oct'26 MTD Sale (1-11 Oct)", "2026 Nov IMS", "2026 Dec IMS"]
+    with pytest.raises(InputFileError, match="2026-11.*2026-10"):
+        parse_input(make_workbook([ROW + [10, 10]], headers=headers))
+
+
+def test_duplicate_forecast_month_is_rejected():
+    headers = BASE + ["Oct'26 MTD Sale (1-11 Oct)", "2026 Oct IMS", "2026 October IMS"]
+    with pytest.raises(InputFileError, match="2026-10"):
+        parse_input(make_workbook([ROW + [10, 10]], headers=headers))
+
+
+def test_unmatched_ims_header_gives_warning():
+    headers = BASE + ["Oct'26 MTD Sale (1-11 Oct)", "2026 Oct IMS", "2026 Nov IMS", "Dec IMS (revised)"]
+    p = parse_input(make_workbook([ROW + [10, 10, 10]], headers=headers))
+    assert p.forecast_months == ["2026-10", "2026-11"]
+    w = next(w for w in p.warnings if w.column == "Dec IMS (revised)")
+    assert w.sap_code is None and "forecast" in w.message
+
+
+def test_sept_and_curly_apostrophe_headers_parse():
+    headers = BASE + ["Sept\u201926 MTD Sale (1-8 Sept)", "2026 Sept IMS", "2026 October IMS", "2026 Nov IMS"]
+    p = parse_input(make_workbook([ROW + [10, 10, 10]], headers=headers))
+    assert p.mtd_month == "2026-09" and p.mtd_end == date(2026, 9, 8)
+    assert p.forecast_months == ["2026-09", "2026-10", "2026-11"]
+    assert p.warnings == []
+
+
+def test_four_letter_june_forecast_header_parses():
+    headers = BASE + ["Jun'27 MTD Sale (1-8 June)", "2027 June IMS", "2027 July IMS"]
+    p = parse_input(make_workbook([ROW + [10, 10]], headers=headers))
+    assert p.forecast_months == ["2027-06", "2027-07"] and p.mtd_month == "2027-06"
+
+
+def test_negative_shelf_life_becomes_unknown_with_warning():
+    p = parse_input(make_workbook([["1001", "Honesty", "X", 12, 0, -6, 14, 10, 0, 0, 5] + [10] * 12]))
+    assert p.skus[0].shelf_life_months is None
+    assert any(w.column == "Shelf Life month" and "shelf life" in w.message and "unknown" in w.message
+               for w in p.warnings)
+
+
+def test_negative_forecast_is_clamped_with_warning():
+    p = parse_input(make_workbook([["1001", "Honesty", "X", 12, 0, 6, 14, 10, 0, 0, 5, -40] + [10] * 11]))
+    assert p.skus[0].forecast["2026-10"] == 0
+    w = next(w for w in p.warnings if "negative forecast" in w.message)
+    assert w.sap_code == "1001" and w.column == "2026 Oct IMS"
