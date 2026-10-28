@@ -14,6 +14,10 @@ export interface SkuInput {
   sit: number
   mtd_sales: number // raw value, may be negative
   forecast: Record<string, number> // "YYYY-MM" -> cartons, ordered by month
+  pg_sellable: number | null // null only in runs saved before stock came from the stock reports
+  pdg_sellable: number | null
+  pg_non_sellable: number | null
+  pdg_non_sellable: number | null
 }
 
 export interface ParseWarning {
@@ -39,9 +43,28 @@ export interface ActualSales {
   warnings: ParseWarning[]
 }
 
+export type StockSource = 'PG' | 'PDG'
+
+export interface StockFileSummary {
+  source: StockSource
+  as_of: string | null
+  skus_with_stock: number // Data SKUs with at least one line in this file
+  sellable_cartons: number // summed over Data SKUs only
+  non_sellable_cartons: number
+}
+
+export interface StockResult {
+  pg: StockFileSummary
+  pdg: StockFileSummary
+  skus_with_stock: number // Data SKUs with a line in either file
+  warnings: ParseWarning[] // report warnings (PG then PDG), then merge warnings
+}
+
 export interface InspectResponse {
   file_name: string
   sales_file_name: string
+  pg_file_name: string
+  pdg_file_name: string
   sku_count: number
   supplier_count: number
   forecast_months: string[] // all forecast columns found in the Data file
@@ -53,7 +76,8 @@ export interface InspectResponse {
   default_plan_date: string
   min_plan_date: string
   max_plan_date: string
-  warnings: ParseWarning[] // Data file warnings, then sales export warnings
+  stock: StockResult
+  warnings: ParseWarning[] // Data file, sales export, stock report and merge, then stock date warnings
 }
 
 export type SkuStatus = 'TO_ORDER' | 'NO_ORDER_NEEDED' | 'HOLDING_NOT_SET' | 'NO_DEMAND_DATA'
@@ -75,6 +99,10 @@ export interface SkuResult {
   sellable: number
   sit: number
   available: number
+  pg_sellable: number | null // breakdown of sellable; null in older runs
+  pdg_sellable: number | null
+  pg_non_sellable: number | null
+  pdg_non_sellable: number | null
   demand_values: DemandValue[] // actuals then forecasts, oldest first
   valid_count: number
   buffer: number | null
@@ -117,6 +145,8 @@ export interface RunListItem {
   created_at: string
   file_name: string
   sales_file_name: string
+  pg_file_name: string | null // null for runs saved before the stock reports
+  pdg_file_name: string | null
   plan_date: string
   sku_count: number
 }
@@ -125,6 +155,7 @@ export interface RunRecord extends RunListItem {
   parsed: ParsedInput
   actual: ActualSales
   result: HoldingPlan
+  stock: StockResult | null // null for runs saved before the stock reports
 }
 
 export interface SupplierSummary {

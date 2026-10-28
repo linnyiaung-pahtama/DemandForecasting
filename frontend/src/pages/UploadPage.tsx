@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createRun, errorText, inspectFiles } from '../api'
-import { fmtDate, monthLabel } from '../lib/format'
+import { fmtDate, fmtQty, monthLabel } from '../lib/format'
 import type { InspectResponse } from '../types'
 
 function monthRange(months: string[]): string {
@@ -14,24 +14,26 @@ export default function UploadPage() {
   const navigate = useNavigate()
   const [dataFile, setDataFile] = useState<File | null>(null)
   const [salesFile, setSalesFile] = useState<File | null>(null)
+  const [pgFile, setPgFile] = useState<File | null>(null)
+  const [pdgFile, setPdgFile] = useState<File | null>(null)
   const [info, setInfo] = useState<InspectResponse | null>(null)
   const [planDate, setPlanDate] = useState('')
   const [inspecting, setInspecting] = useState(false)
   const [calculating, setCalculating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Inspect whenever both files are chosen or either changes. The cleanup flag drops a
+  // Inspect whenever all four files are chosen or any changes. The cleanup flag drops a
   // response that arrives after the files have changed again.
   useEffect(() => {
     setInfo(null)
     setError(null)
-    if (!dataFile || !salesFile) {
+    if (!dataFile || !salesFile || !pgFile || !pdgFile) {
       setInspecting(false)
       return
     }
     let current = true
     setInspecting(true)
-    inspectFiles(dataFile, salesFile)
+    inspectFiles({ data: dataFile, sales: salesFile, pg: pgFile, pdg: pdgFile })
       .then((result) => {
         if (!current) return
         setInfo(result)
@@ -46,14 +48,17 @@ export default function UploadPage() {
     return () => {
       current = false
     }
-  }, [dataFile, salesFile])
+  }, [dataFile, salesFile, pgFile, pdgFile])
 
   async function onCalculate() {
-    if (!dataFile || !salesFile || !info) return
+    if (!dataFile || !salesFile || !pgFile || !pdgFile || !info) return
     setCalculating(true)
     setError(null)
     try {
-      const run = await createRun(dataFile, salesFile, planDate || undefined)
+      const run = await createRun(
+        { data: dataFile, sales: salesFile, pg: pgFile, pdg: pdgFile },
+        planDate || undefined,
+      )
       navigate(`/runs/${run.id}`)
     } catch (err) {
       setError(errorText(err))
@@ -66,7 +71,7 @@ export default function UploadPage() {
       <div className="card">
         <h2>New plan</h2>
         <p className="muted">
-          Choose the planner's Excel forecast file (only the Data sheet is read) and the sales export.
+          Choose the Data file (only the Data sheet is read), the sales export, and the two stock reports.
         </p>
         <div className="field">
           <label htmlFor="data-file">Data file (.xlsx)</label>
@@ -88,6 +93,26 @@ export default function UploadPage() {
             disabled={calculating}
           />
         </div>
+        <div className="field">
+          <label htmlFor="pg-file">PG Expiry Check (.xlsx)</label>
+          <input
+            id="pg-file"
+            type="file"
+            accept=".xlsx"
+            onChange={(e) => setPgFile(e.target.files?.[0] ?? null)}
+            disabled={calculating}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="pdg-file">PDG Stock List (.xlsx)</label>
+          <input
+            id="pdg-file"
+            type="file"
+            accept=".xlsx"
+            onChange={(e) => setPdgFile(e.target.files?.[0] ?? null)}
+            disabled={calculating}
+          />
+        </div>
         {inspecting && <p className="muted">Reading files…</p>}
       </div>
 
@@ -100,7 +125,7 @@ export default function UploadPage() {
       {info && (
         <div className="card">
           <h2>
-            {info.file_name} + {info.sales_file_name}
+            {[info.file_name, info.sales_file_name, info.pg_file_name, info.pdg_file_name].join(' + ')}
           </h2>
           <dl className="facts">
             <div>
@@ -118,6 +143,26 @@ export default function UploadPage() {
             <div>
               <dt>Forecast months</dt>
               <dd>{monthRange(info.forecast_window)}</dd>
+            </div>
+            <div>
+              <dt>SKUs with stock</dt>
+              <dd>
+                {info.stock.skus_with_stock} of {info.sku_count}
+              </dd>
+            </div>
+            <div>
+              <dt>PG sellable</dt>
+              <dd>
+                {fmtQty(info.stock.pg.sellable_cartons)} cartons
+                {info.stock.pg.as_of && ` · as of ${fmtDate(info.stock.pg.as_of)}`}
+              </dd>
+            </div>
+            <div>
+              <dt>PDG sellable</dt>
+              <dd>
+                {fmtQty(info.stock.pdg.sellable_cartons)} cartons
+                {info.stock.pdg.as_of && ` · printed ${fmtDate(info.stock.pdg.as_of)}`}
+              </dd>
             </div>
           </dl>
           <p>

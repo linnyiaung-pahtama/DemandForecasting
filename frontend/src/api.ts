@@ -68,19 +68,28 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T
 }
 
-function filesForm(dataFile: File, salesFile: File): FormData {
+export interface UploadFiles {
+  data: File
+  sales: File
+  pg: File
+  pdg: File
+}
+
+function filesForm(files: UploadFiles): FormData {
   const form = new FormData()
-  form.append('data_file', dataFile)
-  form.append('sales_file', salesFile)
+  form.append('data_file', files.data)
+  form.append('sales_file', files.sales)
+  form.append('pg_file', files.pg)
+  form.append('pdg_file', files.pdg)
   return form
 }
 
-export function inspectFiles(dataFile: File, salesFile: File): Promise<InspectResponse> {
-  return request<InspectResponse>('/api/inspect', { method: 'POST', body: filesForm(dataFile, salesFile) })
+export function inspectFiles(files: UploadFiles): Promise<InspectResponse> {
+  return request<InspectResponse>('/api/inspect', { method: 'POST', body: filesForm(files) })
 }
 
-export function createRun(dataFile: File, salesFile: File, planDate?: string): Promise<RunRecord> {
-  const form = filesForm(dataFile, salesFile)
+export function createRun(files: UploadFiles, planDate?: string): Promise<RunRecord> {
+  const form = filesForm(files)
   if (planDate) form.append('plan_date', planDate)
   return request<RunRecord>('/api/runs', { method: 'POST', body: form })
 }
