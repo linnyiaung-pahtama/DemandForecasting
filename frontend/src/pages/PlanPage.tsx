@@ -19,9 +19,13 @@ const CARDS: Card[] = [
   { key: 'ZERO_FORECAST', label: 'Zero forecast', zero: true },
 ]
 
+// Keyed by run id so switching runs remounts the view: no stale run, filters or selection carry over.
 export default function PlanPage() {
   const { id } = useParams()
-  const runId = Number(id)
+  return <PlanView key={id} runId={Number(id)} />
+}
+
+function PlanView({ runId }: { runId: number }) {
   const [run, setRun] = useState<RunRecord | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -37,14 +41,6 @@ export default function PlanPage() {
   useEffect(() => {
     let cancelled = false
     currentRunId.current = runId
-    setRun(null)
-    setError(null)
-    setBusy(false)
-    setSelected(null)
-    setSupplier(null)
-    setStatus(null)
-    setZeroForecastOnly(false)
-    setSearch('')
     getRun(runId)
       .then((r) => {
         if (!cancelled) setRun(r)
@@ -91,6 +87,15 @@ export default function PlanPage() {
     } finally {
       if (currentRunId.current === runId) setBusy(false)
     }
+  }
+
+  const filtersActive = supplier !== null || status !== null || zeroForecastOnly || search !== ''
+
+  function clearFilters() {
+    setSupplier(null)
+    setStatus(null)
+    setZeroForecastOnly(false)
+    setSearch('')
   }
 
   function isActive(card: Card): boolean {
@@ -205,6 +210,7 @@ export default function PlanPage() {
         <span className="muted">
           {rows.length} of {result.skus.length} SKUs
         </span>
+        {filtersActive && <button onClick={clearFilters}>Clear filters</button>}
       </div>
 
       <div className={`plan-body${selectedSku ? ' with-detail' : ''}`}>
@@ -257,7 +263,12 @@ export default function PlanPage() {
               {rows.length === 0 && (
                 <tr>
                   <td colSpan={12} className="muted">
-                    No SKUs match the current filters.
+                    No SKUs match the current filters.{' '}
+                    {filtersActive && (
+                      <button className="link-button" onClick={clearFilters}>
+                        Clear filters
+                      </button>
+                    )}
                   </td>
                 </tr>
               )}
