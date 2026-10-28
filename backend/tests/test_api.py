@@ -134,3 +134,16 @@ def test_negative_year_in_sales_export_is_not_a_server_error(client):
     assert any("year/month" in w["message"] for w in r.json()["warnings"])
     only_bad = make_sales_workbook([row])
     assert client.post("/api/inspect", files=files(sales=only_bad)).status_code == 400
+
+
+def test_window_coverage_warnings_reach_inspect_and_the_stored_run(client):
+    from tests.helpers import DEFAULT_HEADERS, make_sales_workbook, make_workbook
+    headers = DEFAULT_HEADERS[:12]            # the Oct forecast column only
+    data = make_workbook([["F1", "Sup", "Noodles", 10, 0, 6, 7, 100, 0, 0, 5, 50]], headers=headers)
+    sales = make_sales_workbook([["PG", "Yangon", "P", "B", "F1", "x", 2026, m, 40, 0] for m in ("Jul", "Aug", "Sep")])
+    expected = ["No forecast column for Nov 2026 — counted as missing",
+                "No forecast column for Dec 2026 — counted as missing"]
+    inspected = client.post("/api/inspect", files=files(data, sales)).json()
+    assert [w["message"] for w in inspected["warnings"] if w["sap_code"] is None] == expected
+    run = client.post("/api/runs", files=files(data, sales)).json()
+    assert [w["message"] for w in run["parsed"]["warnings"] if w["sap_code"] is None] == expected

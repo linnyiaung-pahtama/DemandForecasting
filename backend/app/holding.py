@@ -28,13 +28,15 @@ def plan_sku(sku: SkuInput, actuals: dict[str, float], actual_months: list[str],
                      and not any(d.valid for d in demand_values if d.source == "forecast"))
 
     available = sku.sellable + sku.sit
-    stock_cover = available / buffer if buffer else None
+    stock_cover = available / buffer if buffer and available >= 0 else None
 
     target = required = order_qty = None
     moq_applied = False
     if holding_months is not None:
         target = (buffer or 0.0) * holding_months
-        required = max(math.ceil(target - available - EPS), 0)
+        # no demand data: target and order are 0 whatever the stock (spec section 6), even if
+        # available is negative
+        required = max(math.ceil(target - available - EPS), 0) if valid_count else 0
         order_qty = required
         if 0 < required < sku.moq:
             order_qty = math.ceil(sku.moq - EPS)

@@ -146,7 +146,7 @@ def test_four_letter_june_forecast_header_parses():
 def test_negative_shelf_life_becomes_unknown_with_warning():
     p = parse_input(make_workbook([["1001", "Honesty", "X", 12, 0, -6, 14, 10, 0, 0, 5] + [10] * 12]))
     assert p.skus[0].shelf_life_months is None
-    assert any(w.column == "Shelf Life month" and "shelf life" in w.message and "unknown" in w.message
+    assert any(w.column == "Shelf Life month" and "shelf life" in w.message and "not used" in w.message
                for w in p.warnings)
 
 
@@ -155,3 +155,50 @@ def test_negative_forecast_is_clamped_with_warning():
     assert p.skus[0].forecast["2026-10"] == 0
     w = next(w for w in p.warnings if "negative forecast" in w.message)
     assert w.sap_code == "1001" and w.column == "2026 Oct IMS"
+
+
+# ---- forecast-window coverage ---------------------------------------------------------------
+
+def test_missing_window_months_get_file_level_warnings():
+    headers = BASE + ["Oct'26 MTD Sale (1-11 Oct)", "2026 Oct IMS"]
+    p = parse_input(make_workbook([ROW + [10]], headers=headers))
+    missing = [w for w in p.warnings if "No forecast column" in w.message]
+    assert [w.message for w in missing] == ["No forecast column for Nov 2026 — counted as missing",
+                                            "No forecast column for Dec 2026 — counted as missing"]
+    assert all(w.sap_code is None for w in missing)
+
+
+def test_full_window_has_no_coverage_warning():
+    p = parse_input(SAMPLE.read_bytes())
+    assert not any("No forecast column" in w.message for w in p.warnings)
+
+
+def test_forecast_entirely_before_the_window_is_rejected():
+    months = ["Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun"]
+    headers = BASE + ["Oct'26 MTD Sale (1-11 Oct)"] + [
+        f"{2025 if m in ('Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec') else 2026} {m} IMS" for m in months]
+    with pytest.raises(InputFileError, match="Oct 2026.*Nov 2026.*Dec 2026"):
+        parse_input(make_workbook([ROW + [10] * 12], headers=headers))
+
+
+# ---- negative stock and v1-only wording -------------------------------------------------------
+
+def test_negative_stock_warns():
+    p = parse_input(make_workbook([["1001", "Honesty", "X", 12, 0, 6, 14, -20, 0, -3, 5] + [10] * 12]))
+    assert p.skus[0].sellable == -20 and p.skus[0].sit == -3
+    msgs = {w.column: w.message for w in p.warnings if "negative stock" in w.message}
+    assert msgs == {"Total Sellable (Ctns)": "negative stock — check the stock report",
+                    "SIT Ctns (pending order)": "negative stock — check the stock report"}
+    assert all(w.sap_code == "1001" for w in p.warnings if "negative stock" in w.message)
+
+
+def test_v1_only_warnings_say_they_are_not_used():
+    rows = [["1001", "Honesty", "X", 12, 0, 0, 14, 10, 0, 0, -5] + [10] * 12,
+            ["1002", "Honesty", "X", 12, 0, -2, 14, 10, 0, 0, 5] + [10] * 12,
+            ["1003", "Honesty", "X", 12, 0, "n/a", 14, 10, 0, 0, 5] + [10] * 12]
+    msgs = [w.message for w in parse_input(make_workbook(rows)).warnings]
+    assert sorted(msgs) == [
+        "negative MTD sales (not used in the order calculation)",
+        "negative shelf life (not used in the order calculation)",
+        "non-numeric shelf life (not used in the order calculation)",
+        "shelf life 0 (not used in the order calculation)"]

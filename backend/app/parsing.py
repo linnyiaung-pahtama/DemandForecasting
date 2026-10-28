@@ -6,6 +6,7 @@ from io import BytesIO
 from openpyxl import load_workbook
 
 from app.models import InputFileError, ParsedInput, ParseWarning, SkuInput
+from app.months import month_label, next_months
 
 REQUIRED_COLUMNS = [
     "SAP Code",
@@ -146,6 +147,20 @@ def parse_input(data: bytes) -> ParsedInput:
             f"The first forecast month ({forecast_cols[0][0]}) is later than the MTD month "
             f"({mtd_month}); the forecast must start no later than the MTD month.")
 
+    window = next_months(mtd_month, 3)  # the forecast months the order calculation uses
+    present = {key for key, _, _ in forecast_cols}
+    if not present.intersection(window):
+        raise InputFileError(
+            "None of the forecast months used in the calculation have a column: expected "
+            + ", ".join(month_label(m) for m in window)
+            + f" (the MTD month and the next 2), but the forecast columns cover "
+            f"{month_label(forecast_cols[0][0])} to {month_label(forecast_cols[-1][0])}.")
+    for key in window:
+        if key not in present:
+            warnings.append(ParseWarning(
+                sap_code=None, column=None,
+                message=f"No forecast column for {month_label(key)} — counted as missing"))
+
     def col(name: str) -> tuple[int, str]:
         return columns[_norm(name)]
 
@@ -198,13 +213,13 @@ def parse_input(data: bytes) -> ParsedInput:
             if shelf_num <= 0:
                 warnings.append(ParseWarning(
                     sap_code=sap, column=h_shelf,
-                    message=("shelf life 0 treated as unknown (no cap)" if shelf_num == 0
-                             else "negative shelf life treated as unknown (no cap)")))
+                    message=("shelf life 0 (not used in the order calculation)" if shelf_num == 0
+                             else "negative shelf life (not used in the order calculation)")))
             else:
                 shelf = shelf_num
         elif shelf_raw is not None and _collapse(shelf_raw) not in ("", "-"):
             warnings.append(ParseWarning(sap_code=sap, column=h_shelf,
-                                         message="non-numeric shelf life treated as unknown (no cap)"))
+                                         message="non-numeric shelf life (not used in the order calculation)"))
 
         lead_num = _to_number(cell(c_lead))
         if lead_num is not None and lead_num < 0:
@@ -221,7 +236,7 @@ def parse_input(data: bytes) -> ParsedInput:
         mtd = num(mtd_col, mtd_label)
         if mtd < 0:
             warnings.append(ParseWarning(sap_code=sap, column=mtd_label,
-                                         message="negative MTD sales (returns) treated as 0"))
+                                         message="negative MTD sales (not used in the order calculation)"))
 
         forecast: dict[str, float] = {}
         for key, i, text in forecast_cols:
@@ -232,6 +247,12 @@ def parse_input(data: bytes) -> ParsedInput:
                 fc = 0.0
             forecast[key] = fc
 
+        sellable, sit = num(c_sell, h_sell), num(c_sit, h_sit)
+        for value, header in ((sellable, h_sell), (sit, h_sit)):
+            if value < 0:
+                warnings.append(ParseWarning(sap_code=sap, column=header,
+                                             message="negative stock — check the stock report"))
+
         skus.append(SkuInput(
             sap_code=sap,
             supplier=_collapse(cell(c_sup)),
@@ -240,9 +261,9 @@ def parse_input(data: bytes) -> ParsedInput:
             moq=num(c_moq, h_moq),
             shelf_life_months=shelf,
             lead_time_days=lead,
-            sellable=num(c_sell, h_sell),
+            sellable=sellable,
             non_sellable=num(c_non, h_non),
-            sit=num(c_sit, h_sit),
+            sit=sit,
             mtd_sales=mtd,
             forecast=forecast,
         ))

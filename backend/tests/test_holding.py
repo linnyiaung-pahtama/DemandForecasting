@@ -61,6 +61,20 @@ def test_no_demand_data():
     assert run(actuals=(0, 0, 0), fc=(0, 0, 0), holding=None).status == SkuStatus.HOLDING_NOT_SET
 
 
+def test_negative_available_without_demand_never_orders():
+    r = run(sellable=-20, sit=0, moq=50, actuals=(0, 0, 0), fc=(0, 0, 0))
+    assert r.available == -20 and r.status == SkuStatus.NO_DEMAND_DATA
+    assert r.target == 0 and r.required == 0 and r.order_qty == 0 and not r.moq_applied
+    assert r.stock_cover_months is None
+
+
+def test_negative_available_with_demand_has_no_cover_but_orders():
+    r = run(sellable=-20, sit=0, moq=0)       # buffer 120, target 360, available -20
+    assert r.required == 380 and r.order_qty == 380 and r.status == SkuStatus.TO_ORDER
+    assert r.stock_cover_months is None
+    assert run(sellable=0, sit=0).stock_cover_months == 0     # zero stock is a real 0.0 months
+
+
 def test_zero_forecast_flag_still_orders():
     r = run(fc=(0, 0, 0))                  # buffer from actuals only = 110
     assert r.zero_forecast and r.buffer == pytest.approx(110) and r.order_qty == 150
