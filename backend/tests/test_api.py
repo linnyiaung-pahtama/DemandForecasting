@@ -149,8 +149,13 @@ def test_window_coverage_warnings_reach_inspect_and_the_stored_run(client):
     ignored = "Stock columns in the Data sheet are ignored; stock comes from the PDG Stock List and PG Expiry Check files."
     parsed_messages = [ignored, *expected]
     inspected = client.post("/api/inspect", files=files(data, sales)).json()
-    # Data-file warnings come first in the inspect list, ahead of the sales and stock ones
-    assert [w["message"] for w in inspected["warnings"][:len(parsed_messages)]] == parsed_messages
+    # inspect = Data warnings, then the stock reports' merge warnings (the fixture's stock sheets have none of F1's codes)
+    stock_messages = [
+        "PG Expiry Check: 108 stock codes are not in the Data sheet; ignored",
+        "PG Expiry Check has no stock for any SKU in the Data sheet — check that it is the right report",
+        "PDG Stock List: 68 stock codes are not in the Data sheet; ignored",
+        "PDG Stock List has no stock for any SKU in the Data sheet — check that it is the right report"]
+    assert [w["message"] for w in inspected["warnings"] if w["sap_code"] is None] == parsed_messages + stock_messages
     run = client.post("/api/runs", files=files(data, sales)).json()
     assert [w["message"] for w in run["parsed"]["warnings"] if w["sap_code"] is None] == parsed_messages
 
