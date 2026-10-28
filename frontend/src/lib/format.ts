@@ -52,6 +52,11 @@ export function fmtCover(n: number | null): string {
   return n === null ? '—' : n.toFixed(1)
 }
 
+/** An exact figure for the arithmetic lines: up to 4 decimals, trailing zeros trimmed, thousands separators. */
+export function fmtExact(n: number): string {
+  return n.toLocaleString('en-US', { maximumFractionDigits: 4 })
+}
+
 const EPSILON = 1e-9
 
 function plural(n: number, unit: string): string {
@@ -74,21 +79,22 @@ export function orderExplanation(r: SkuResult, planDate: string): string[] {
   }
 
   const lines = [
-    `Buffer = (${valid.map(fmtQty).join(' + ')}) ÷ ${r.valid_count} = ${fmtQty(r.buffer)} a month`,
+    `Buffer = (${valid.map(fmtExact).join(' + ')}) ÷ ${r.valid_count} = ${fmtExact(r.buffer)} a month`,
   ]
-  const available = `Available = ${fmtQty(r.sellable)} sellable + ${fmtQty(r.sit)} SIT = ${fmtQty(r.available)}`
+  const available = `Available = ${fmtExact(r.sellable)} sellable + ${fmtExact(r.sit)} SIT = ${fmtExact(r.available)}`
 
   if (r.holding_months === null || r.target === null || r.required === null) {
     lines.push(holdingNotSet, available)
   } else {
-    lines.push(`Target = ${fmtQty(r.buffer)} × ${plural(r.holding_months, 'month')} = ${fmtQty(r.target)}`, available)
+    lines.push(`Target = ${fmtExact(r.buffer)} × ${plural(r.holding_months, 'month')} = ${fmtExact(r.target)}`, available)
     if (r.required === 0) {
       lines.push('Required = 0 (available already covers the target)')
     } else {
-      const roundedUp = Math.abs(r.target - r.available - r.required) > EPSILON
+      const gap = r.target - r.available
+      const roundedUp = Math.abs(gap - r.required) > EPSILON
       lines.push(
-        `Required = ${fmtQty(r.target)} − ${fmtQty(r.available)} = ${fmtQty(r.required)}` +
-          (roundedUp ? ' (rounded up to whole cartons)' : ''),
+        `Required = ${fmtExact(r.target)} − ${fmtExact(r.available)} = ` +
+          (roundedUp ? `${fmtExact(gap)}, rounded up to ${fmtQty(r.required)}` : fmtQty(r.required)),
       )
     }
     if (r.moq_applied && r.moq > 0 && r.order_qty !== null) {
@@ -99,7 +105,7 @@ export function orderExplanation(r: SkuResult, planDate: string): string[] {
   }
 
   if (r.stock_cover_months !== null) {
-    lines.push(`Stock cover = ${fmtQty(r.available)} ÷ ${fmtQty(r.buffer)} = ${fmtCover(r.stock_cover_months)} months`)
+    lines.push(`Stock cover = ${fmtExact(r.available)} ÷ ${fmtExact(r.buffer)} = ${fmtCover(r.stock_cover_months)} months`)
   }
 
   if (r.next_calc_date !== null && r.lead_time_days !== null) {

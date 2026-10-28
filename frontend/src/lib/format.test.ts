@@ -154,19 +154,69 @@ describe('orderExplanation', () => {
     expect(lines.some((l) => l.startsWith('MOQ check'))).toBe(false)
   })
 
-  it('notes rounding up when the gap is not a whole carton count', () => {
+  it('shows exact figures and the round-up for real data with fractional values', () => {
+    // SKU 3102111001: actuals 2113/40, 1451/40, 1647/40 cartons; forecast 55 x 3.
     const r: SkuResult = {
       ...worked,
-      buffer: 120.4,
-      target: 361.2,
-      required: 102,
+      sap_code: '3102111001',
+      lead_time_days: 7,
       moq: 0,
+      sellable: 22.15,
+      sit: 16,
+      available: 22.15 + 16,
+      demand_values: demand([2113 / 40, 1451 / 40, 1647 / 40, 55, 55, 55]),
+      valid_count: 6,
+      buffer: 49.2125,
+      holding_months: 3,
+      target: 49.2125 * 3,
+      required: 110,
+      order_qty: 110,
       moq_applied: false,
-      order_qty: 102,
+      stock_cover_months: (22.15 + 16) / 49.2125,
+      next_calc_date: '2026-10-19',
     }
-    expect(orderExplanation(r, '2026-10-14')).toContain(
-      'Required = 361 − 260 = 102 (rounded up to whole cartons)',
-    )
+    const lines = orderExplanation(r, '2026-10-12')
+    expect(lines).toEqual([
+      'Buffer = (52.825 + 36.275 + 41.175 + 55 + 55 + 55) ÷ 6 = 49.2125 a month',
+      'Target = 49.2125 × 3 months = 147.6375',
+      'Available = 22.15 sellable + 16 SIT = 38.15',
+      'Required = 147.6375 − 38.15 = 109.4875, rounded up to 110',
+      'Stock cover = 38.15 ÷ 49.2125 = 0.8 months',
+      'Next calculation date = 12 Oct 2026 + 7 days lead time = 19 Oct 2026',
+    ])
+  })
+
+  it('lists holding not set after no valid demand', () => {
+    const r: SkuResult = {
+      ...worked,
+      demand_values: demand([0, null, -3, 0, 0, null]),
+      valid_count: 0,
+      buffer: null,
+      holding_months: null,
+      target: null,
+      required: null,
+      order_qty: null,
+      moq_applied: false,
+      stock_cover_months: null,
+      status: 'HOLDING_NOT_SET',
+    }
+    expect(orderExplanation(r, '2026-10-14')).toEqual([
+      'No valid demand values (all 6 months are zero, negative or missing)',
+      'Holding not set for Acme — no order calculated',
+    ])
+  })
+
+  it('says when the lead time is not valid', () => {
+    const r: SkuResult = { ...worked, lead_time_days: -2, next_calc_date: null }
+    const lines = orderExplanation(r, '2026-10-14')
+    expect(lines[lines.length - 1]).toBe('Next calculation date: lead time of -2 days is not valid')
+  })
+
+  it('uses singular month and day for 1', () => {
+    const r: SkuResult = { ...worked, holding_months: 1, target: 120, lead_time_days: 1, next_calc_date: '2026-10-15' }
+    const lines = orderExplanation(r, '2026-10-14')
+    expect(lines[1]).toBe('Target = 120 × 1 month = 120')
+    expect(lines[lines.length - 1]).toBe('Next calculation date = 14 Oct 2026 + 1 day lead time = 15 Oct 2026')
   })
 
   it('shows decimal holding as stored', () => {
