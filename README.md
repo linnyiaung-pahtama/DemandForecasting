@@ -7,7 +7,7 @@ It runs on your own Windows computer: a Python (FastAPI) backend with a SQLite d
 ## Requirements
 
 - Python 3.12
-- Node 22.12 or later (needed by vitest 5; the app uses React 19 and Vite 6)
+- Node 22.12+ (22 or 24 LTS); needed by vitest 5, and the app uses React 19 and Vite 6
 
 ## First-time setup
 
@@ -51,9 +51,9 @@ Then open http://localhost:5173. The frontend forwards `/api` requests to the ba
 ## Using it
 
 1. **New plan**: choose the two files (the Data file and the sales export), check the detected months, plan date and any warnings, then click Calculate. Calculate is enabled once both files inspect OK.
-2. **Order plan**: count cards (SKUs to order, Holding not set, No demand data, Zero forecast), a banner listing blocked suppliers, and filters for supplier, status, the Zero forecast flag and search. Click a SKU to see its six demand values and the arithmetic behind its order. The supplier summary is reached from this page.
+2. **Order plan**: count cards (To order, Holding not set, No demand data, Zero forecast), a banner listing blocked suppliers, and filters for supplier, status, the Zero forecast flag and search. A warnings panel above the table shows file-level warnings (labelled Data file or Sales export) in full and counts the per-SKU warnings in a collapsible list. Click a SKU to see its six demand values and the arithmetic behind its order. The supplier summary is reached from this page.
 3. **Supplier summary**: per supplier, the holding, SKU counts, total order cartons and blocked / no-demand SKUs. Expand a supplier for the list of SKUs to put on one purchase order.
-4. **Supplier settings**: one Holding (months) per supplier, plus the change log. Saving recalculates the latest run.
+4. **Supplier settings**: one Holding (months) per supplier, plus the change log (the newest 200 entries, newest first). Saving recalculates the latest run.
 5. **History**: reopen a past run exactly as it was calculated.
 6. **Export**: Excel download with four sheets: SKU Plan, Supplier Summary, Settings Used and Warnings.
 
@@ -82,14 +82,14 @@ Columns it uses:
 
 `Shelf Life month` and `Total Non-Sellable (Ctns)` are still read and checked but are not used in the calculation.
 
-A missing `Data` sheet or required column, forecast months with a gap, or a forecast that starts after the MTD month rejects the file with a message. Per-row problems (non-numeric values, negative month-to-date sales, negative forecast, zero or negative shelf life, missing lead time) and unrecognised `IMS` headers are kept and shown as warnings; nothing is cleaned silently.
+A missing `Data` sheet or required column, forecast months with a gap, a forecast that starts after the MTD month, or no forecast column at all for the 3 months used (the MTD month and the next 2) rejects the file with a message. If only some of those 3 months have no column, the file is accepted with a warning per missing month ("No forecast column for Nov 2026 — counted as missing"). Per-row problems (non-numeric values, negative stock, negative forecast, missing lead time, and the shelf life and month-to-date oddities that the calculation does not use) and unrecognised `IMS` headers are kept and shown as warnings; nothing is cleaned silently.
 
 ### Sales export
 
 This is admin's system export of past sales.
 
 - A sheet whose header row (within the first 10 rows) contains `itemCode`, `Year`, `Month` and `Qty`. The sheet is found by its headers, not its name. Other columns and other sheets are ignored.
-- One row per branch, item and month. `Month` is a month name (`Jul`) and `Year` a number (`2026`).
+- One row per branch, item and month. `Month` is a month name (`Jul`), a number 1-12, or an Excel date (its own month and year are used), and `Year` is a number (`2026`). A row whose year or month cannot be read is skipped with a warning; if that leaves none of the 3 actual months, the rejection message says how many rows were unreadable.
 - `Qty` is in **pieces**. The tool sums `Qty` over all rows for an item and month, then divides by the item's `Packing Size` in the Data file to get cartons (for example 2,113 pieces / 40 = 52.83 cartons).
 - It must cover the 3 months before the MTD month (Jul, Aug, Sep 2026 for an October MTD). The file is rejected if it has none of them. If only one or two are missing, the run continues and the missing months count as missing demand, with a warning.
 
@@ -106,7 +106,7 @@ For each SKU:
 3. **Available stock** = Total Sellable + SIT.
 4. **Required** = target - available, never below 0, rounded up to whole cartons.
 5. **MOQ check**: if 0 < required < MOQ, the order is the MOQ (tagged "MOQ"). If required is 0, the order is 0 and is not raised to MOQ.
-6. **Stock cover** (months) = available / buffer. Not shown if there is no buffer.
+6. **Stock cover** (months) = available / buffer. Not shown if there is no buffer or if available stock is negative.
 7. **Next calculation date** = plan date + lead time (days). Not shown, with a warning, if lead time is missing or negative.
 
 Worked example (holding 3 months, available stock 260, MOQ 150, plan date 14 Oct 2026, lead time 61 days):
@@ -130,8 +130,8 @@ The SKU detail page writes out this arithmetic for every SKU, with the six value
 |---|---|
 | **To order** | The supplier has a holding and the order quantity is above 0. |
 | **No order needed** | The supplier has a holding and available stock already covers the target, so the order is 0. |
-| **Holding not set** | The supplier has no holding yet, so its SKUs are blocked: target, required and order are shown as "-". Buffer, available and cover are still shown. The run is not rejected; a banner lists the blocked suppliers with a link to Supplier settings. |
-| **No demand data** | None of the 6 values is valid, so there is no buffer. Target and order are 0 and cover is "-". |
+| **Holding not set** | The supplier has no holding yet, so its SKUs are blocked: target, required and order are shown as "—". Buffer, available and cover are still shown. The run is not rejected; a banner lists the blocked suppliers with a link to Supplier settings. |
+| **No demand data** | None of the 6 values is valid, so there is no buffer. Target and order are 0 whatever the stock (even if stock is negative), so a no-demand SKU is never ordered, and cover is "—". |
 
 **Zero forecast** is a flag, not a status. It is raised when all 3 forecast months are 0 or invalid but at least one actual month is valid. The order is still calculated from the actuals, and the flag tells the planner to review the SKU before ordering. It shows in the table, on a count card, and as a filter option, whether or not the order is above 0.
 
@@ -176,7 +176,7 @@ The backend tests run against a temporary database automatically (`backend/tests
 - **No order tracking.** The tool does not record which suggested orders were actually placed. Orders placed since the last upload only count once they appear in the Data file's `SIT Ctns (pending order)` column; until then a mid-month re-run will suggest them again.
 - **Stock in transit counts as available.** SIT is added to available stock in full; the Data file has no arrival dates for it.
 - **Lead time does not change the order quantity.** It only sets the next calculation date.
-- **No minimum number of valid values.** A buffer built from few values is shown, not hidden. The "n of 6" column on the Order plan page shows how thin a buffer is.
+- **No minimum number of valid values.** A buffer built from few values is shown, not hidden. The "Valid" column on the Order plan page (shown as n/6) shows how thin a buffer is.
 - **No Yangon/Mandalay split.** One order quantity per SKU.
 - **Cartons only.** There are no prices or money values; the sales export's `Amount` column is ignored.
 - The forecast is an input; the tool does not generate or adjust it.
