@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { errorText, exportUrl, getRun, recalculate } from '../api'
 import SkuDetail from '../components/SkuDetail'
 import StatusChip from '../components/StatusChip'
+import WarningsPanel from '../components/WarningsPanel'
 import { filterSkus } from '../lib/filters'
 import type { SkuFilter } from '../lib/filters'
 import { fmtCover, fmtDate, fmtMonths, fmtQty, statusLabel } from '../lib/format'
@@ -153,6 +154,8 @@ function PlanView({ runId }: { runId: number }) {
           not calculated — set holding in <Link to="/settings">Supplier settings</Link>
         </div>
       )}
+
+      <WarningsPanel dataWarnings={run.parsed.warnings} salesWarnings={run.actual.warnings} />
 
       <div className="cards">
         {CARDS.map((c) => (

@@ -442,3 +442,20 @@ tr.default-row {
 h2.section-head {
   margin-top: 2rem;
 }
+
+.warnings-panel {
+  margin-bottom: 1rem;
+}
+
+.warnings-panel .alert.warn {
+  margin-bottom: 0.6rem;
+}
+
+.warnings-panel .flag-messages {
+  margin-top: 0.4rem;
+}
+
+.warnings-panel .warnings {
+  margin-bottom: 0;
+  background: var(--surface);
+}

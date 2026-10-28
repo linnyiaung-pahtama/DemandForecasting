@@ -1,4 +1,4 @@
-import { fmtMonths, fmtQty, monthLabel, orderExplanation } from '../lib/format'
+import { fmtExact, fmtMonths, fmtQty, monthLabel, orderExplanation } from '../lib/format'
 import type { ParseWarning, SkuResult } from '../types'
 import StatusChip from './StatusChip'
 
@@ -72,7 +72,7 @@ export default function SkuDetail({ sku, planDate, warnings, onClose }: Props) {
             <tr key={`${d.source}-${d.month}`} className={d.valid ? undefined : 'muted'}>
               <td>{monthLabel(d.month)}</td>
               <td>{d.source === 'actual' ? 'Actual' : 'Forecast'}</td>
-              <td className="num">{d.value === null ? '—' : fmtQty(d.value)}</td>
+              <td className="num">{d.value === null ? '—' : fmtExact(d.value)}</td>
               <td aria-label={d.valid ? 'Valid' : 'Skipped'}>{d.valid ? '✓' : '✗'}</td>
             </tr>
           ))}
