@@ -88,9 +88,13 @@ def test_suppliers_route(client):
     assert client.get("/api/runs/999/suppliers").status_code == 404
 
 
-def test_export_is_not_implemented_yet(client):
+def test_export_route(client):
     run = client.post("/api/runs", files=files()).json()
-    assert client.get(f"/api/runs/{run['id']}/export").status_code == 501
+    r = client.get(f"/api/runs/{run['id']}/export")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert r.headers["content-disposition"] == f'attachment; filename="order-plan-2026-10-12-run{run["id"]}.xlsx"'
+    assert client.get("/api/runs/999/export").status_code == 404
 
 
 def test_holding_bounds_accepted(client):

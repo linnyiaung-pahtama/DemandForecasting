@@ -126,10 +126,7 @@ def create_app(db_path: Path = config.DB_PATH) -> FastAPI:
     @app.get("/api/runs/{run_id}/export")
     def export_run(run_id: int) -> Response:
         run = get_run_or_404(run_id)
-        try:
-            content = build_export(run)
-        except NotImplementedError as exc:
-            raise HTTPException(status_code=501, detail=str(exc)) from exc
+        content = build_export(run)
         filename = f"order-plan-{run.plan_date.isoformat()}-run{run.id}.xlsx"
         return Response(content=content, media_type=XLSX_MEDIA_TYPE,
                         headers={"Content-Disposition": f'attachment; filename="{filename}"'})
