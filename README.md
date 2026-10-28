@@ -109,7 +109,7 @@ For each SKU:
 6. **Stock cover** (months) = available / buffer. Not shown if there is no buffer.
 7. **Next calculation date** = plan date + lead time (days). Not shown, with a warning, if lead time is missing or negative.
 
-Worked example (holding 3 months, available stock 260, MOQ 150, lead time 45 days, plan date 30 Oct 2026):
+Worked example (holding 3 months, available stock 260, MOQ 150, plan date 14 Oct 2026, lead time 61 days):
 
 | Step | Working | Result |
 |---|---|---|
@@ -120,7 +120,7 @@ Worked example (holding 3 months, available stock 260, MOQ 150, lead time 45 day
 | Required | 360 - 260 | 100 |
 | Order | 100 is below the MOQ of 150, so the MOQ applies | 150 |
 | Stock cover | 260 / 120 | 2.2 months |
-| Next calculation date | 30 Oct 2026 + 45 days | 14 Dec 2026 |
+| Next calculation date | 14 Oct 2026 + 61 days lead time (about 2 months) | 14 Dec 2026 |
 
 The SKU detail page writes out this arithmetic for every SKU, with the six values and which were valid.
 
