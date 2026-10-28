@@ -337,6 +337,11 @@ tr.selected {
   background: #fdebc4;
 }
 
+.chip-blue {
+  color: #174a96;
+  background: #dbe8fb;
+}
+
 .chip-grey {
   color: #3d4654;
   background: #e5e8ee;
@@ -365,6 +370,7 @@ tr.selected {
 }
 
 .orders,
+.steps,
 .flag-messages {
   margin: 0;
   padding-left: 1.1rem;
@@ -426,4 +432,9 @@ tr.default-row {
 .alert.ok {
   background: #e8f5ea;
   border: 1px solid #a8d5ae;
+}
+
+.steps li {
+  margin-bottom: 0.35rem;
+  font-variant-numeric: tabular-nums;
 }
