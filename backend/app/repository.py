@@ -9,8 +9,8 @@ from app.models import (
     ActualSales,
     HoldingPlan,
     ParsedInput,
-    RunListItemV2,
-    RunRecordV2,
+    RunListItem,
+    RunRecord,
     SettingsLogEntry,
     SupplierHolding,
 )
@@ -104,12 +104,12 @@ class Repository:
                 (result.plan_date.isoformat(), len(result.skus), result.model_dump_json(), run_id),
             )
 
-    def get_run(self, run_id: int) -> RunRecordV2 | None:
+    def get_run(self, run_id: int) -> RunRecord | None:
         with self._conn() as conn:
             row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
         if row is None:
             return None
-        return RunRecordV2(
+        return RunRecord(
             id=row["id"],
             created_at=row["created_at"],
             file_name=row["file_name"],
@@ -121,13 +121,13 @@ class Repository:
             result=HoldingPlan.model_validate_json(row["result_json"]),
         )
 
-    def list_runs(self) -> list[RunListItemV2]:
+    def list_runs(self) -> list[RunListItem]:
         with self._conn() as conn:
             rows = conn.execute(
                 "SELECT id, created_at, file_name, sales_file_name, plan_date, sku_count"
                 " FROM runs ORDER BY id DESC"
             ).fetchall()
-        return [RunListItemV2(**dict(r)) for r in rows]
+        return [RunListItem(**dict(r)) for r in rows]
 
     def latest_run_id(self) -> int | None:
         with self._conn() as conn:

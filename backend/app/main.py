@@ -2,25 +2,35 @@
 from datetime import date
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
 from app import config
-from app.engine import plan_all, plan_date_bounds, validate_plan_date
+from app.holding import plan_all, plan_date_bounds, validate_plan_date
 from app.export import XLSX_MEDIA_TYPE, build_export
-from app.models import (InputFileError, InspectResponse, ParsedInput, RunListItem, RunRecord,
-                        SupplierSetting, SupplierSettingView, SupplierSummary)
+from app.models import (ActualSales, InputFileError, InspectResponse, ParsedInput, RunListItem,
+                        RunRecord, SettingsLogEntry, SupplierHolding, SupplierSettingView,
+                        SupplierSummary)
+from app.months import next_months
 from app.parsing import parse_input
 from app.repository import Repository
+from app.sales import actual_cartons, parse_sales
 from app.summary import summarize_suppliers
 
+MIN_HOLDING, MAX_HOLDING = 0.5, 24
 
-def _parse_upload(file: UploadFile) -> ParsedInput:
+
+def _parse_uploads(data_file: UploadFile, sales_file: UploadFile) -> tuple[ParsedInput, ActualSales]:
     try:
-        return parse_input(file.file.read())
+        parsed = parse_input(data_file.file.read())
     except InputFileError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=f"Data file: {exc}") from exc
+    try:
+        actual = actual_cartons(parse_sales(sales_file.file.read()), parsed)
+    except InputFileError as exc:
+        raise HTTPException(status_code=400, detail=f"Sales export: {exc}") from exc
+    return parsed, actual
 
 
 def _parse_plan_date(text: str | None) -> date | None:
@@ -32,16 +42,12 @@ def _parse_plan_date(text: str | None) -> date | None:
         raise HTTPException(status_code=422, detail=f"Plan date '{text}' is not a valid date (use YYYY-MM-DD).") from exc
 
 
-def _validate_setting(item: SupplierSetting) -> None:
-    for label, value in (("reorder_days", item.reorder_days), ("target_days", item.target_days)):
-        if not 1 <= value <= 365:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Supplier '{item.supplier}': {label} must be a whole number from 1 to 365.")
-    if item.target_days <= item.reorder_days:
+def _validate_holding(item: SupplierHolding) -> None:
+    value = item.holding_months
+    if value is not None and not MIN_HOLDING <= value <= MAX_HOLDING:
         raise HTTPException(
             status_code=422,
-            detail=f"Supplier '{item.supplier}': target days must be greater than reorder days.")
+            detail=f"Supplier '{item.supplier}': holding must be between 0.5 and 24 months, or blank.")
 
 
 def create_app(db_path: Path = config.DB_PATH) -> FastAPI:
@@ -61,27 +67,30 @@ def create_app(db_path: Path = config.DB_PATH) -> FastAPI:
         return {"status": "ok"}
 
     @app.post("/api/inspect", response_model=InspectResponse)
-    def inspect(file: UploadFile = File(...)) -> InspectResponse:
-        parsed = _parse_upload(file)
+    def inspect(data_file: UploadFile = File(...), sales_file: UploadFile = File(...)) -> InspectResponse:
+        parsed, actual = _parse_uploads(data_file, sales_file)
         min_date, max_date = plan_date_bounds(parsed)
         return InspectResponse(
-            file_name=file.filename or "", sku_count=len(parsed.skus),
-            supplier_count=len({s.supplier for s in parsed.skus}),
-            forecast_months=parsed.forecast_months, mtd_label=parsed.mtd_label,
+            file_name=data_file.filename or "", sales_file_name=sales_file.filename or "",
+            sku_count=len(parsed.skus), supplier_count=len({s.supplier for s in parsed.skus}),
+            forecast_months=parsed.forecast_months, actual_months=actual.months,
+            forecast_window=next_months(parsed.mtd_month, 3),
+            skus_with_sales=actual.skus_with_sales, mtd_label=parsed.mtd_label,
             mtd_end=parsed.mtd_end, default_plan_date=parsed.default_plan_date,
-            min_plan_date=min_date, max_plan_date=max_date, warnings=parsed.warnings)
+            min_plan_date=min_date, max_plan_date=max_date,
+            warnings=parsed.warnings + actual.warnings)
 
     @app.post("/api/runs", response_model=RunRecord)
-    def create_run(file: UploadFile = File(...), plan_date: str | None = Form(None)) -> RunRecord:
-        parsed = _parse_upload(file)
+    def create_run(data_file: UploadFile = File(...), sales_file: UploadFile = File(...),
+                   plan_date: str | None = Form(None)) -> RunRecord:
+        parsed, actual = _parse_uploads(data_file, sales_file)
         chosen = _parse_plan_date(plan_date) or parsed.default_plan_date
         try:
             validate_plan_date(parsed, chosen)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        result = plan_all(parsed, repo.get_settings(), chosen)
-        repo.add_default_settings([s for s in result.settings_used if s.supplier in result.new_suppliers])
-        run_id = repo.create_run(file.filename or "", parsed, result)
+        result = plan_all(parsed, actual, repo.get_holdings(), chosen)
+        run_id = repo.create_run(data_file.filename or "", sales_file.filename or "", parsed, actual, result)
         return get_run_or_404(run_id)
 
     @app.get("/api/runs", response_model=list[RunListItem])
@@ -95,22 +104,27 @@ def create_app(db_path: Path = config.DB_PATH) -> FastAPI:
     @app.post("/api/runs/{run_id}/recalculate", response_model=RunRecord)
     def recalculate(run_id: int) -> RunRecord:
         run = get_run_or_404(run_id)
-        result = plan_all(run.parsed, repo.get_settings(), run.result.plan_date)
+        result = plan_all(run.parsed, run.actual, repo.get_holdings(), run.result.plan_date)
         repo.update_run_result(run_id, result)
         return get_run_or_404(run_id)
 
     @app.get("/api/runs/{run_id}/suppliers", response_model=list[SupplierSummary])
-    def run_suppliers(run_id: int, window_weeks: int = Query(4, ge=1, le=52)) -> list[SupplierSummary]:
-        return summarize_suppliers(get_run_or_404(run_id).result, window_weeks)
+    def run_suppliers(run_id: int) -> list[SupplierSummary]:
+        return summarize_suppliers(get_run_or_404(run_id).result)
 
     @app.get("/api/runs/{run_id}/export")
-    def export_run(run_id: int, window_weeks: int = Query(4, ge=1, le=52)) -> Response:
+    def export_run(run_id: int) -> Response:
         run = get_run_or_404(run_id)
+        try:
+            content = build_export(run)
+        except NotImplementedError as exc:
+            raise HTTPException(status_code=501, detail=str(exc)) from exc
         filename = f"order-plan-{run.plan_date.isoformat()}-run{run.id}.xlsx"
-        return Response(content=build_export(run, window_weeks), media_type=XLSX_MEDIA_TYPE,
+        return Response(content=content, media_type=XLSX_MEDIA_TYPE,
                         headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
     def settings_views() -> list[SupplierSettingView]:
+        holdings = repo.get_holdings()
         stats: dict[str, tuple[int, int | None]] = {}
         latest = repo.latest_run_id()
         if latest is not None:
@@ -120,20 +134,25 @@ def create_app(db_path: Path = config.DB_PATH) -> FastAPI:
                     lead = sku.lead_time_days if lead is None else max(lead, sku.lead_time_days)
                 stats[sku.supplier] = (count + 1, lead)
         return [
-            SupplierSettingView(**s.model_dump(), max_lead_time_days=stats.get(s.supplier, (0, None))[1],
-                                sku_count=stats.get(s.supplier, (0, None))[0])
-            for s in sorted(repo.get_settings().values(), key=lambda s: s.supplier)]
+            SupplierSettingView(supplier=name, holding_months=holdings.get(name),
+                                sku_count=stats.get(name, (0, None))[0],
+                                max_lead_time_days=stats.get(name, (0, None))[1])
+            for name in sorted(set(stats) | set(holdings))]
 
     @app.get("/api/settings", response_model=list[SupplierSettingView])
     def get_settings() -> list[SupplierSettingView]:
         return settings_views()
 
     @app.put("/api/settings", response_model=list[SupplierSettingView])
-    def put_settings(items: list[SupplierSetting]) -> list[SupplierSettingView]:
+    def put_settings(items: list[SupplierHolding]) -> list[SupplierSettingView]:
         for item in items:
-            _validate_setting(item)
-        repo.save_settings([item.model_copy(update={"is_default": False}) for item in items])
+            _validate_holding(item)
+        repo.save_holdings(items)
         return settings_views()
+
+    @app.get("/api/settings/log", response_model=list[SettingsLogEntry])
+    def settings_log() -> list[SettingsLogEntry]:
+        return repo.get_settings_log()
 
     return app
 

@@ -3,7 +3,9 @@ import calendar
 import math
 from datetime import date, timedelta
 
-from app.models import DemandValue, ParsedInput, SkuInput, SkuResult, SkuStatus
+from app.models import (ActualSales, DemandValue, HoldingPlan, ParsedInput, SkuInput, SkuResult,
+                        SkuStatus, SupplierHolding)
+from app.months import next_months
 
 EPS = 1e-9
 
@@ -85,3 +87,23 @@ def validate_plan_date(parsed: ParsedInput, plan_date: date) -> None:
             f"Plan date {plan_date.isoformat()} is outside the allowed range: "
             f"{earliest.isoformat()} to {last.isoformat()}. Stock figures are as of the MTD end "
             f"({parsed.mtd_end.isoformat()}), so the plan date can be at most the end of that month.")
+
+
+def plan_all(parsed: ParsedInput, actual: ActualSales, holdings: dict[str, float],
+             plan_date: date) -> HoldingPlan:
+    """Plan every SKU in the Data file with the current supplier holdings."""
+    actual_months = actual.months
+    forecast_months = next_months(parsed.mtd_month, 3)
+    skus = [plan_sku(sku, actual.cartons.get(sku.sap_code, {}), actual_months, forecast_months,
+                     holdings.get(sku.supplier), plan_date) for sku in parsed.skus]
+    suppliers = list(dict.fromkeys(sku.supplier for sku in parsed.skus))  # first-appearance order
+    counts = {status.value: 0 for status in SkuStatus}
+    counts["ZERO_FORECAST"] = 0
+    for result in skus:
+        counts[result.status.value] += 1
+        counts["ZERO_FORECAST"] += result.zero_forecast
+    return HoldingPlan(
+        plan_date=plan_date, actual_months=actual_months, forecast_months=forecast_months,
+        skus=skus,
+        settings_used=[SupplierHolding(supplier=s, holding_months=holdings.get(s)) for s in suppliers],
+        blocked_suppliers=[s for s in suppliers if s not in holdings], counts=counts)

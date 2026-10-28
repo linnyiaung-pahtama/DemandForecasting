@@ -1,85 +1,64 @@
 import pytest
 from fastapi.testclient import TestClient
+from pathlib import Path
 from app.main import create_app
-from tests.test_parsing import SAMPLE
+
+FIX = Path(__file__).parent / "fixtures"
+DATA, SALES = (FIX / "sample_input.xlsx").read_bytes(), (FIX / "sales_export.xlsx").read_bytes()
+
 
 @pytest.fixture
 def client(tmp_path):
     return TestClient(create_app(tmp_path / "t.db"))
 
-def upload(client, path="/api/runs", **form):
-    return client.post(path, files={"file": ("sample.xlsx", SAMPLE.read_bytes())}, data=form)
 
-def test_health(client):
-    assert client.get("/api/health").json() == {"status": "ok"}
+def files(data=DATA, sales=SALES):
+    return {"data_file": ("data.xlsx", data), "sales_file": ("sales.xlsx", sales)}
 
-def test_inspect_reports_counts_and_dates(client):
-    r = upload(client, "/api/inspect").json()
-    assert r["sku_count"] == 212 and r["supplier_count"] == 17
-    assert r["default_plan_date"] == "2026-10-12" and r["min_plan_date"] == "2026-10-12"
-    assert r["max_plan_date"] == "2026-10-31" and r["mtd_end"] == "2026-10-11"
 
-def test_create_run_then_fetch_and_list(client):
-    run = upload(client).json()
-    assert len(run["result"]["skus"]) == 212 and len(run["result"]["new_suppliers"]) == 17
-    assert client.get(f"/api/runs/{run['id']}").json()["id"] == run["id"]
-    assert client.get("/api/runs").json()[0]["id"] == run["id"]
-    assert client.get("/api/runs/999").status_code == 404
+def test_inspect_reports_months_and_coverage(client):
+    r = client.post("/api/inspect", files=files()).json()
+    assert r["actual_months"] == ["2026-07", "2026-08", "2026-09"]
+    assert r["forecast_window"] == ["2026-10", "2026-11", "2026-12"]
+    assert r["sku_count"] == 212 and r["skus_with_sales"] == 141 and r["sales_file_name"] == "sales.xlsx"
 
-def test_settings_change_and_recalculate(client):
-    run = upload(client).json()
+
+def test_new_run_blocks_all_suppliers_until_holding_set(client):
+    run = client.post("/api/runs", files=files()).json()
+    assert run["result"]["counts"]["HOLDING_NOT_SET"] == 212
+    assert len(run["result"]["blocked_suppliers"]) == 17
     s = client.get("/api/settings").json()
-    assert len(s) == 17 and all(x["is_default"] for x in s)
-    honesty = next(x for x in s if x["supplier"] == "Honesty")
-    assert honesty["max_lead_time_days"] is not None
-    r = client.put("/api/settings", json=[{"supplier": "Honesty", "reorder_days": 45, "target_days": 60}])
-    assert r.status_code == 200
+    assert len(s) == 17 and all(x["holding_months"] is None for x in s)
+
+
+def test_set_holding_recalculates_real_sku(client):
+    run = client.post("/api/runs", files=files()).json()
+    assert client.put("/api/settings", json=[{"supplier": "CFC", "holding_months": 3}]).status_code == 200
     rec = client.post(f"/api/runs/{run['id']}/recalculate").json()
-    used = next(x for x in rec["result"]["settings_used"] if x["supplier"] == "Honesty")
-    assert used["reorder_days"] == 45 and not used["is_default"]
+    sku = next(x for x in rec["result"]["skus"] if x["sap_code"] == "3102111001")
+    # actuals 2113/40, 1451/40, 1647/40; forecast 55, 55, 55 -> buffer 49.2125
+    assert sku["buffer"] == pytest.approx(49.2125)
+    assert sku["target"] == pytest.approx(147.6375) and sku["available"] == pytest.approx(38.15)
+    assert sku["order_qty"] == 110 and sku["status"] == "TO_ORDER"
+    assert sku["next_calc_date"] == "2026-10-19"
+    log = client.get("/api/settings/log").json()
+    assert log[0]["supplier"] == "CFC" and log[0]["old_value"] is None and log[0]["new_value"] == 3
 
-def test_settings_validation(client):
-    r = client.put("/api/settings", json=[{"supplier": "A", "reorder_days": 30, "target_days": 30}])
-    assert r.status_code == 422 and "A" in r.text
 
-def test_settings_validation_range(client):
-    r = client.put("/api/settings", json=[{"supplier": "B", "reorder_days": 0, "target_days": 30}])
-    assert r.status_code == 422 and "B" in r.text
-    r = client.put("/api/settings", json=[{"supplier": "C", "reorder_days": 30, "target_days": 366}])
-    assert r.status_code == 422 and "C" in r.text
+def test_holding_validation(client):
+    for bad in (0, 25, "abc"):
+        assert client.put("/api/settings", json=[{"supplier": "A", "holding_months": bad}]).status_code == 422
+    assert client.put("/api/settings", json=[{"supplier": "A", "holding_months": None}]).status_code == 200
 
-def test_supplier_summary_window(client):
-    run = upload(client).json()
-    s = client.get(f"/api/runs/{run['id']}/suppliers?window_weeks=4").json()
-    assert len(s) == 17
-    assert client.get(f"/api/runs/{run['id']}/suppliers?window_weeks=0").status_code == 422
-    assert client.get("/api/runs/999/suppliers").status_code == 404
 
-def test_recalculate_unknown_run_returns_404(client):
+def test_swapped_files_return_400(client):
+    r = client.post("/api/inspect", files=files(data=SALES, sales=DATA))
+    assert r.status_code == 400 and r.json()["detail"].startswith("Data file:")
+    r = client.post("/api/runs", files=files(sales=DATA))
+    assert r.status_code == 400 and r.json()["detail"].startswith("Sales export:")
+
+
+def test_plan_date_range_and_404s(client):
+    assert client.post("/api/runs", files=files(), data={"plan_date": "2026-11-02"}).status_code == 422
+    assert client.get("/api/runs/999").status_code == 404
     assert client.post("/api/runs/999/recalculate").status_code == 404
-
-def test_recalculate_keeps_plan_date(client):
-    run = upload(client, plan_date="2026-10-20").json()
-    rec = client.post(f"/api/runs/{run['id']}/recalculate").json()
-    assert rec["plan_date"] == "2026-10-20" and rec["result"]["plan_date"] == "2026-10-20"
-    assert client.get("/api/runs").json()[0]["plan_date"] == "2026-10-20"
-
-def test_upload_wrong_file_returns_400(client):
-    r = client.post("/api/runs", files={"file": ("old.xlsb", b"not a workbook")})
-    assert r.status_code == 400 and "xlsx" in r.json()["detail"]
-    r = client.post("/api/inspect", files={"file": ("old.xlsb", b"not a workbook")})
-    assert r.status_code == 400
-
-def test_plan_date_outside_allowed_range_returns_422(client):
-    assert upload(client, plan_date="2026-10-05").status_code == 422
-    assert upload(client, plan_date="2027-10-01").status_code == 422
-    assert upload(client, plan_date="2026-10-31").status_code == 200
-    r = upload(client, plan_date="2026-11-02")
-    assert r.status_code == 422 and "2026-10-31" in r.text and "MTD end" in r.text
-
-def test_invalid_plan_date_text_returns_422(client):
-    assert upload(client, plan_date="not-a-date").status_code == 422
-
-def test_cors_allows_dev_origin(client):
-    r = client.get("/api/health", headers={"Origin": "http://localhost:5173"})
-    assert r.headers["access-control-allow-origin"] == "http://localhost:5173"

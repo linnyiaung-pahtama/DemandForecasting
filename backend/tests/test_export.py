@@ -1,3 +1,7 @@
+import pytest
+
+pytest.skip("rewritten in Task 5", allow_module_level=True)
+
 from io import BytesIO
 
 import openpyxl

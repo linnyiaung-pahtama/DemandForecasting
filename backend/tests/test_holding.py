@@ -116,3 +116,18 @@ def test_plan_date_bounds_when_mtd_ends_on_month_end():
     parsed = parse_input(make_workbook([["1001", "S", "X", 12, 0, 6, 7, 10, 0, 0, 5] + [10] * 12], headers=headers))
     assert plan_date_bounds(parsed) == (date(2026, 11, 1), date(2026, 11, 1))
     validate_plan_date(parsed, date(2026, 11, 1))
+
+
+def test_plan_all_counts_and_zero_forecast():
+    from pathlib import Path
+    from app.holding import plan_all
+    from app.parsing import parse_input
+    from app.sales import actual_cartons, parse_sales
+    fix = Path(__file__).parent / "fixtures"
+    parsed = parse_input((fix / "sample_input.xlsx").read_bytes())
+    actual = actual_cartons(parse_sales((fix / "sales_export.xlsx").read_bytes()), parsed)
+    result = plan_all(parsed, actual, {}, parsed.default_plan_date)
+    assert result.counts["HOLDING_NOT_SET"] == 212
+    zero = sum(1 for s in result.skus if s.zero_forecast)
+    assert result.counts["ZERO_FORECAST"] == zero and zero > 0
+    assert result.forecast_months == ["2026-10", "2026-11", "2026-12"]
