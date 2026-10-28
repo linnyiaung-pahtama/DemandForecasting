@@ -6,21 +6,9 @@ from openpyxl import load_workbook
 
 from app.models import ActualSales, InputFileError, ParsedInput, ParseWarning, SalesExport
 from app.months import month_label, prev_months
-from app.parsing import HEADER_SEARCH_ROWS, _is_number, _month_number, _norm, _to_number
+from app.parsing import _is_number, _month_number, _norm, _to_number, find_header_row
 
 REQUIRED_COLUMNS = ["itemCode", "Year", "Month", "Qty"]
-
-
-def _find_header(rows: list[tuple]) -> tuple[int, dict[str, int]] | None:
-    """(row index, normalized header -> column index) of the first header row with all required columns."""
-    for i, row in enumerate(rows[:HEADER_SEARCH_ROWS]):
-        columns: dict[str, int] = {}
-        for c, h in enumerate(row):
-            if _norm(h):
-                columns.setdefault(_norm(h), c)
-        if all(_norm(name) in columns for name in REQUIRED_COLUMNS):
-            return i, columns
-    return None
 
 
 def _year_month(year_cell, month_cell) -> tuple[int, int] | None:
@@ -52,7 +40,7 @@ def parse_sales(data: bytes) -> SalesExport:
         for ws in wb.worksheets:
             ws.reset_dimensions()  # read-only mode trusts the stored sheet size, which exports sometimes get wrong
             rows = list(ws.iter_rows(values_only=True))
-            header = _find_header(rows)
+            header = find_header_row(rows, REQUIRED_COLUMNS)
             if header is not None:
                 found = (rows, *header)
                 break

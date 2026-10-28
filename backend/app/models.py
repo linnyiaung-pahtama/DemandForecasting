@@ -54,6 +54,23 @@ class ActualSales(BaseModel):
     warnings: list[ParseWarning]
 
 
+StockSource = Literal["PG", "PDG"]
+
+
+class StockLine(BaseModel):
+    code: str  # normalised like Data SAP codes
+    sellable: bool
+    cartons: float
+
+
+class StockReport(BaseModel):
+    source: StockSource
+    lines: list[StockLine]
+    as_of: date | None  # PDG: Printed_Date; PG: most common (expired Date - Day Left)
+    skipped_codes: list[str]  # codes of rows skipped for an unreadable quantity (distinct, in file order)
+    warnings: list[ParseWarning]  # file-level; every message starts with the report name
+
+
 class InspectResponse(BaseModel):
     file_name: str
     sales_file_name: str

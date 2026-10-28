@@ -1,3 +1,4 @@
+from datetime import datetime
 from io import BytesIO
 
 from openpyxl import Workbook
@@ -38,6 +39,49 @@ def make_sales_workbook(rows: list[list], headers: list[str] | None = None, shee
     for c, h in enumerate(headers if headers is not None else SALES_HEADERS, start=1):
         ws.cell(row=1, column=c, value=h)
     for r, row in enumerate(rows, start=2):
+        for c, v in enumerate(row, start=1):
+            ws.cell(row=r, column=c, value=v)
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+PG_HEADERS = ["Item Code", "Whs Code", "Location", "SOH", "UOM", "Ctn", "expired Date", "Day Left"]
+PDG_HEADERS = ["StockCode", "Description", "Location", "Sell or Non", "U_Ratio", "Bin_Qty", "cs"]
+
+
+def make_pg_workbook(rows: list[list], headers: list[str] = PG_HEADERS, hidden_rows: tuple[int, ...] = ()) -> bytes:
+    """Build a PG Expiry Check xlsx: row 1 totals, row 2 headers, data from row 3; hidden_rows are sheet row numbers."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "PG Expiry Check"
+    if "Ctn" in headers:
+        ws.cell(row=1, column=headers.index("Ctn") + 1, value=999)
+    for c, h in enumerate(headers, start=1):
+        ws.cell(row=2, column=c, value=h)
+    for r, row in enumerate(rows, start=3):
+        for c, v in enumerate(row, start=1):
+            ws.cell(row=r, column=c, value=v)
+    for r in hidden_rows:
+        ws.row_dimensions[r].hidden = True
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def make_pdg_workbook(rows: list[list], headers: list[str] = PDG_HEADERS,
+                      printed: datetime | None = datetime(2026, 10, 12, 6, 45)) -> bytes:
+    """Build a PDG Stock List xlsx: Printed_Date block on rows 1-2, headers on row 4, data from row 5."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "PDG Stock List"
+    ws.cell(row=1, column=1, value="Printed_Date")
+    ws.cell(row=1, column=2, value="Item_Code")
+    ws.cell(row=2, column=1, value=printed)
+    ws.cell(row=2, column=2, value="ALL To ALL")
+    for c, h in enumerate(headers, start=1):
+        ws.cell(row=4, column=c, value=h)
+    for r, row in enumerate(rows, start=5):
         for c, v in enumerate(row, start=1):
             ws.cell(row=r, column=c, value=v)
     buf = BytesIO()

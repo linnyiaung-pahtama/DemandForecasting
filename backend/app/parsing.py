@@ -70,6 +70,18 @@ def _to_number(v) -> float | None:
     return None
 
 
+def find_header_row(rows: list[tuple], required: list[str]) -> tuple[int, dict[str, int]] | None:
+    """(row index, normalized header -> column index) of the first header row with all required columns."""
+    for i, row in enumerate(rows[:HEADER_SEARCH_ROWS]):
+        columns: dict[str, int] = {}
+        for c, h in enumerate(row):
+            if _norm(h):
+                columns.setdefault(_norm(h), c)
+        if all(_norm(name) in columns for name in required):
+            return i, columns
+    return None
+
+
 def parse_input(data: bytes) -> ParsedInput:
     try:
         wb = load_workbook(BytesIO(data), read_only=True, data_only=True)
