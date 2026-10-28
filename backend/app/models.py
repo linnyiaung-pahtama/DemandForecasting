@@ -131,6 +131,10 @@ class SkuResult(BaseModel):
     sellable: float
     sit: float
     available: float
+    pg_sellable: float | None = None  # breakdown of sellable, copied from SkuInput; None in older runs
+    pdg_sellable: float | None = None
+    pg_non_sellable: float | None = None
+    pdg_non_sellable: float | None = None
     demand_values: list[DemandValue]  # actuals then forecasts, oldest first
     valid_count: int
     buffer: float | None
@@ -181,6 +185,7 @@ class RunRecord(RunListItem):
     parsed: ParsedInput
     actual: ActualSales
     result: HoldingPlan
+    stock: StockResult | None = None  # None for runs saved before the stock reports
 
 
 class SupplierSummary(BaseModel):

@@ -64,16 +64,19 @@ def build_export(run: RunRecord) -> bytes:
                   + [by_month.get(("forecast", m)) for m in result.forecast_months])
         sku_rows.append([
             sku.supplier, sku.sap_code, sku.description, sku.status.value, _yes_no(sku.zero_forecast),
-            sku.sellable, sku.sit, sku.available, *demand,
+            sku.sellable, sku.pg_sellable, sku.pdg_sellable, sku.sit, sku.available,
+            sku.pg_non_sellable, sku.pdg_non_sellable, *demand,
             sku.valid_count, sku.buffer, sku.holding_months, sku.target, sku.required, sku.moq,
             _yes_no(sku.moq_applied), sku.order_qty, sku.stock_cover_months, sku.lead_time_days,
             sku.next_calc_date])
     ws = wb.active
     ws.title = "SKU Plan"
-    formats = {name: TWO_DECIMALS for name in ["Sellable", "SIT", "Available", *month_headers, "Buffer", "Target"]}
+    formats = {name: TWO_DECIMALS for name in ["Sellable", "PG Sellable", "PDG Sellable", "SIT", "Available",
+                                       "PG Non-Sellable", "PDG Non-Sellable", *month_headers, "Buffer", "Target"]}
     formats["Stock Cover (months)"] = ONE_DECIMAL
-    _write_sheet(ws, ["Supplier", "SAP Code", "Description", "Status", "Zero Forecast", "Sellable", "SIT",
-                      "Available", *month_headers, "Valid Values", "Buffer", "Holding (months)", "Target",
+    _write_sheet(ws, ["Supplier", "SAP Code", "Description", "Status", "Zero Forecast", "Sellable",
+                      "PG Sellable", "PDG Sellable", "SIT", "Available", "PG Non-Sellable",
+                      "PDG Non-Sellable", *month_headers, "Valid Values", "Buffer", "Holding (months)", "Target",
                       "Required", "MOQ", "MOQ Applied", "Order Qty", "Stock Cover (months)",
                       "Lead Time (days)", "Next Calculation Date"], sku_rows, formats)
 
@@ -88,7 +91,8 @@ def build_export(run: RunRecord) -> bytes:
                  [[s.supplier, s.holding_months] for s in result.settings_used])
 
     warnings = ([("Data file", w) for w in run.parsed.warnings]
-                + [("Sales export", w) for w in run.actual.warnings])
+                + [("Sales export", w) for w in run.actual.warnings]
+                + [("Stock files", w) for w in (run.stock.warnings if run.stock else [])])
     _write_sheet(wb.create_sheet("Warnings"), ["Source", "SAP Code", "Column", "Message"],
                  [[source, w.sap_code, w.column, w.message] for source, w in warnings])
 

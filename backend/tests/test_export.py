@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from app.export import build_export
 from app.holding import plan_all
 from app.main import create_app
-from app.models import ParseWarning, RunRecord
+from app.models import ParseWarning, RunRecord, StockFileSummary, StockResult
 from app.parsing import parse_input
 from app.sales import actual_cartons, parse_sales
 from app.stock import apply_stock, parse_pdg, parse_pg
@@ -49,7 +49,8 @@ def test_export_v2_sheets_and_values(tmp_path):
     assert ws.max_row == 213
     header = [cell.value for cell in ws[1]]
     assert header == [
-        "Supplier", "SAP Code", "Description", "Status", "Zero Forecast", "Sellable", "SIT", "Available",
+        "Supplier", "SAP Code", "Description", "Status", "Zero Forecast", "Sellable", "PG Sellable", "PDG Sellable",
+        "SIT", "Available", "PG Non-Sellable", "PDG Non-Sellable",
         "Jul 2026 Actual", "Aug 2026 Actual", "Sep 2026 Actual",
         "Oct 2026 Forecast", "Nov 2026 Forecast", "Dec 2026 Forecast",
         "Valid Values", "Buffer", "Holding (months)", "Target", "Required", "MOQ", "MOQ Applied",
@@ -78,6 +79,34 @@ def test_export_v2_sheets_and_values(tmp_path):
     # the real Data file carries 13 parse warnings (10 negative MTD, 3 zero shelf life); the sales export none
     sources = [r[0] for r in warnings.iter_rows(min_row=2, values_only=True)]
     assert sources == ["Data file"] * 13
+
+
+def test_export_stock_columns_and_warnings():
+    run = make_run(DATA, SALES, {"CFC": 3})
+    sku = run.result.skus[0]
+    sku.pg_sellable, sku.pdg_sellable, sku.pg_non_sellable, sku.pdg_non_sellable = 12.5, 3, 1, None
+    summary = StockFileSummary(source="PG", as_of=None, skus_with_stock=1, sellable_cartons=0,
+                               non_sellable_cartons=0)
+    run.stock = StockResult(pg=summary, pdg=summary.model_copy(update={"source": "PDG"}), skus_with_stock=1,
+                            warnings=[ParseWarning(sap_code="X1", column=None, message="stock warning")])
+    wb = load(build_export(run))
+    ws = wb["SKU Plan"]
+    header = [c.value for c in ws[1]]
+    cells = dict(zip(header, ws[2]))
+    assert cells["PG Sellable"].value == 12.5 and cells["PG Sellable"].number_format == "0.00"
+    assert cells["PDG Sellable"].value == 3 and cells["PG Non-Sellable"].value == 1
+    assert cells["PDG Non-Sellable"].value is None and cells["PDG Non-Sellable"].number_format == "0.00"
+    rows = [[c.value for c in r] for r in wb["Warnings"].iter_rows(min_row=2)]
+    assert rows[-1] == ["Stock files", "X1", None, "stock warning"]
+
+    plain = make_run(DATA, SALES, {"CFC": 3})
+    for s in plain.result.skus:
+        s.pg_sellable = s.pdg_sellable = s.pg_non_sellable = s.pdg_non_sellable = None
+    plain.stock = None
+    wb2 = load(build_export(plain))
+    row = dict(zip(header, wb2["SKU Plan"][2]))
+    assert all(row[h].value is None for h in ("PG Sellable", "PDG Sellable", "PG Non-Sellable", "PDG Non-Sellable"))
+    assert "Stock files" not in [r[0] for r in wb2["Warnings"].iter_rows(min_row=2, values_only=True)]
 
 
 def test_export_neutralises_formula_text():

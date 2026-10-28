@@ -31,6 +31,16 @@ def test_spec_worked_example():
     assert [d.source for d in r.demand_values] == ["actual"] * 3 + ["forecast"] * 3
 
 
+def test_breakdown_is_copied_to_result():
+    s = sku(sellable=200)
+    s.pg_sellable, s.pdg_sellable, s.pg_non_sellable, s.pdg_non_sellable = 150, 50, 7, 3
+    r = plan_sku(s, dict(zip(ACT, (100, 120, 110))), ACT, FC, 3, PD)
+    assert (r.pg_sellable, r.pdg_sellable, r.pg_non_sellable, r.pdg_non_sellable) == (150, 50, 7, 3)
+    assert r.sellable == 200
+    blank = run()
+    assert blank.pg_sellable is None and blank.pdg_non_sellable is None
+
+
 def test_invalid_values_are_skipped():
     r = run(actuals=(-5, 0, 110))          # -5 and 0 invalid
     assert r.valid_count == 4 and r.buffer == pytest.approx((110 + 130 + 140 + 120) / 4)

@@ -62,7 +62,9 @@ def plan_sku(sku: SkuInput, actuals: dict[str, float], actual_months: list[str],
     return SkuResult(
         sap_code=sku.sap_code, supplier=sku.supplier, description=sku.description,
         packing_size=sku.packing_size, lead_time_days=lead, moq=sku.moq, sellable=sku.sellable,
-        sit=sku.sit, available=available, demand_values=demand_values, valid_count=valid_count,
+        sit=sku.sit, available=available, pg_sellable=sku.pg_sellable, pdg_sellable=sku.pdg_sellable,
+        pg_non_sellable=sku.pg_non_sellable, pdg_non_sellable=sku.pdg_non_sellable,
+        demand_values=demand_values, valid_count=valid_count,
         buffer=buffer, holding_months=holding_months, target=target, required=required,
         order_qty=order_qty, moq_applied=moq_applied, stock_cover_months=stock_cover,
         next_calc_date=next_calc_date, status=status, zero_forecast=zero_forecast)
