@@ -3,9 +3,11 @@ import pytest
 from pathlib import Path
 from app.parsing import parse_input
 from app.models import InputFileError
-from tests.helpers import make_workbook
+from tests.helpers import DEFAULT_HEADERS, make_workbook
 
 SAMPLE = Path(__file__).parent / "fixtures" / "sample_input.xlsx"
+STOCK_COLUMNS_MESSAGE = ("Stock columns in the Data sheet are ignored; "
+                         "stock comes from the PDG Stock List and PG Expiry Check files.")
 
 def test_parses_sample_file():
     p = parse_input(SAMPLE.read_bytes())
@@ -19,7 +21,7 @@ def test_parses_sample_file():
     sku = next(s for s in p.skus if s.sap_code == "3401111006")
     assert sku.supplier == "MayMyo Fresh Coffee"
     assert sku.lead_time_days == 7 and sku.packing_size == 30 and sku.shelf_life_months == 12
-    assert sku.sellable == pytest.approx(44.1, abs=0.01)
+    assert sku.sellable == 0 and sku.pg_sellable is None   # stock comes from the stock reports
     assert sku.sit == pytest.approx(41, abs=0.01)
     assert sku.forecast["2026-10"] == pytest.approx(128.71, abs=0.01)
 
@@ -52,8 +54,25 @@ def test_numeric_sap_code_has_no_decimal():
 def test_blank_and_text_numbers_become_zero_with_warning():
     data = make_workbook([["1001","Honesty","X",12,0,6,14,None,0,"n/a",5] + [10]*12])
     p = parse_input(data)
-    assert p.skus[0].sellable == 0 and p.skus[0].sit == 0
-    assert {w.column for w in p.warnings} >= {"Total Sellable (Ctns)", "SIT Ctns (pending order)"}
+    assert p.skus[0].sit == 0
+    assert {w.column for w in p.warnings} >= {"SIT Ctns (pending order)"}
+
+def test_data_sheet_without_stock_columns_parses():
+    headers = [h for h in DEFAULT_HEADERS if h not in ("Total Sellable (Ctns)", "Total Non-Sellable (Ctns)")]
+    p = parse_input(make_workbook([["1001", "Honesty", "X", 12, 0, 6, 14, 3, 5] + [10] * 12], headers=headers))
+    assert p.warnings == []
+    assert p.skus[0].sellable == 0 and p.skus[0].non_sellable == 0 and p.skus[0].sit == 3
+    assert p.skus[0].pg_sellable is None and p.skus[0].pdg_non_sellable is None
+
+
+def test_each_stock_column_triggers_the_single_ignored_warning():
+    headers = [h for h in DEFAULT_HEADERS if h not in ("Total Sellable (Ctns)", "Total Non-Sellable (Ctns)")]
+    headers.insert(7, "Sellable (PG)")
+    p = parse_input(make_workbook([["1001", "Honesty", "X", 12, 0, 6, 14, 9, 3, 5] + [10] * 12], headers=headers))
+    assert [w.message for w in p.warnings] == [STOCK_COLUMNS_MESSAGE]
+    assert p.warnings[0].sap_code is None and p.warnings[0].column is None
+    assert p.skus[0].sit == 3 and p.skus[0].sellable == 0
+
 
 def test_missing_lead_time_is_none_with_warning():
     data = make_workbook([["1001","Honesty","X",12,0,6,None,10,0,0,5] + [10]*12])
@@ -91,9 +110,9 @@ def test_numeric_text_is_parsed():
     s = p.skus[0]
     assert s.packing_size == 12 and s.moq == 0 and s.shelf_life_months == 6
     assert s.lead_time_days == 14
-    assert s.sellable == 1250.5 and s.non_sellable == 3 and s.sit == 7 and s.mtd_sales == 1000
+    assert s.sit == 7 and s.mtd_sales == 1000
     assert s.forecast["2026-10"] == 1250.5
-    assert p.warnings == []
+    assert [w.message for w in p.warnings] == [STOCK_COLUMNS_MESSAGE]   # the old-style stock columns are ignored
 
 
 # ---- header handling and value cleaning ------------------------------------------------------
@@ -134,7 +153,7 @@ def test_sept_and_curly_apostrophe_headers_parse():
     p = parse_input(make_workbook([ROW + [10, 10, 10]], headers=headers))
     assert p.mtd_month == "2026-09" and p.mtd_end == date(2026, 9, 8)
     assert p.forecast_months == ["2026-09", "2026-10", "2026-11"]
-    assert p.warnings == []
+    assert [w.message for w in p.warnings] == [STOCK_COLUMNS_MESSAGE]
 
 
 def test_four_letter_june_forecast_header_parses():
@@ -185,10 +204,9 @@ def test_forecast_entirely_before_the_window_is_rejected():
 
 def test_negative_stock_warns():
     p = parse_input(make_workbook([["1001", "Honesty", "X", 12, 0, 6, 14, -20, 0, -3, 5] + [10] * 12]))
-    assert p.skus[0].sellable == -20 and p.skus[0].sit == -3
+    assert p.skus[0].sit == -3
     msgs = {w.column: w.message for w in p.warnings if "negative stock" in w.message}
-    assert msgs == {"Total Sellable (Ctns)": "negative stock — check the stock report",
-                    "SIT Ctns (pending order)": "negative stock — check the stock report"}
+    assert msgs == {"SIT Ctns (pending order)": "negative stock — check the stock report"}
     assert all(w.sap_code == "1001" for w in p.warnings if "negative stock" in w.message)
 
 
@@ -196,7 +214,7 @@ def test_v1_only_warnings_say_they_are_not_used():
     rows = [["1001", "Honesty", "X", 12, 0, 0, 14, 10, 0, 0, -5] + [10] * 12,
             ["1002", "Honesty", "X", 12, 0, -2, 14, 10, 0, 0, 5] + [10] * 12,
             ["1003", "Honesty", "X", 12, 0, "n/a", 14, 10, 0, 0, 5] + [10] * 12]
-    msgs = [w.message for w in parse_input(make_workbook(rows)).warnings]
+    msgs = [w.message for w in parse_input(make_workbook(rows)).warnings if w.message != STOCK_COLUMNS_MESSAGE]
     assert sorted(msgs) == [
         "negative MTD sales (not used in the order calculation)",
         "negative shelf life (not used in the order calculation)",

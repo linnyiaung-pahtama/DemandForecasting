@@ -4,13 +4,19 @@ from pathlib import Path
 from app.holding import plan_all
 from app.parsing import parse_input
 from app.sales import actual_cartons, parse_sales
+from app.stock import apply_stock, parse_pdg, parse_pg
 from app.summary import summarize_suppliers
 
 FIX = Path(__file__).parent / "fixtures"
 
 
+def _parsed_with_stock():
+    raw = (FIX / "sample_input.xlsx").read_bytes()   # the planner's workbook holds the Data and both stock sheets
+    return apply_stock(parse_input(raw), parse_pg(raw), parse_pdg(raw))[0]
+
+
 def test_summary_rolls_up_real_fixtures():
-    parsed = parse_input((FIX / "sample_input.xlsx").read_bytes())
+    parsed = _parsed_with_stock()
     actual = actual_cartons(parse_sales((FIX / "sales_export.xlsx").read_bytes()), parsed)
     result = plan_all(parsed, actual, {"CFC": 3}, date(2026, 10, 12))
     summary = summarize_suppliers(result)
@@ -24,7 +30,7 @@ def test_summary_rolls_up_real_fixtures():
 
 
 def test_zero_total_suppliers_sort_by_name():
-    parsed = parse_input((FIX / "sample_input.xlsx").read_bytes())
+    parsed = _parsed_with_stock()
     actual = actual_cartons(parse_sales((FIX / "sales_export.xlsx").read_bytes()), parsed)
     summary = summarize_suppliers(plan_all(parsed, actual, {}, date(2026, 10, 12)))
     assert all(s.total_order_qty == 0 for s in summary)

@@ -11,14 +11,17 @@ from app.main import create_app
 from app.models import ParseWarning, RunRecord
 from app.parsing import parse_input
 from app.sales import actual_cartons, parse_sales
-from tests.helpers import make_sales_workbook, make_workbook
+from app.stock import apply_stock, parse_pdg, parse_pg
+from tests.helpers import make_pdg_workbook, make_pg_workbook, make_sales_workbook, make_workbook
 
 FIX = Path(__file__).parent / "fixtures"
 DATA, SALES = (FIX / "sample_input.xlsx").read_bytes(), (FIX / "sales_export.xlsx").read_bytes()
 
 
-def make_run(data: bytes, sales: bytes, holdings: dict[str, float], warnings=None) -> RunRecord:
-    parsed = parse_input(data)
+def make_run(data: bytes, sales: bytes, holdings: dict[str, float], warnings=None,
+             pg: bytes | None = None, pdg: bytes | None = None) -> RunRecord:
+    """pg/pdg are the stock report workbooks; they default to the Data workbook itself (the fixture holds all three)."""
+    parsed, _ = apply_stock(parse_input(data), parse_pg(pg or data), parse_pdg(pdg or data))
     actual = actual_cartons(parse_sales(sales), parsed)
     if warnings is not None:
         parsed.warnings = warnings[0]
@@ -83,7 +86,9 @@ def test_export_neutralises_formula_text():
     sales = make_sales_workbook(
         [["PG", "Yangon", "P", "B", "F1", "x", 2026, m, 40, 0] for m in ("Jul", "Aug", "Sep")])
     run = make_run(data, sales, {"Sup": 3},
-                   warnings=([ParseWarning(sap_code=None, column="-col", message="=oops @x")], []))
+                   warnings=([ParseWarning(sap_code=None, column="-col", message="=oops @x")], []),
+                   pg=make_pg_workbook([["F1", "W", "Sellable", 100, 1, 100, None, None]]),
+                   pdg=make_pdg_workbook([["Z", "x", "L", None, 1, 1, None]]))
     run.result.skus[0].description = "=SUM(A1)"
     run.result.skus[0].supplier = "=Evil"
     run.result.settings_used[0].supplier = "=Evil"
@@ -124,7 +129,9 @@ def test_export_strips_illegal_characters_and_labels_warning_sources():
         [["PG", "Yangon", "P", "B", "F1", "x", 2026, m, 40, 0] for m in ("Jul", "Aug", "Sep")])
     run = make_run(data, sales, {}, warnings=(
         [ParseWarning(sap_code="F1", column="MOQ", message="from data")],
-        [ParseWarning(sap_code=None, column=None, message="from sales")]))
+        [ParseWarning(sap_code=None, column=None, message="from sales")]),
+        pg=make_pg_workbook([["F1", "W", "Sellable", 100, 1, 100, None, None]]),
+        pdg=make_pdg_workbook([["F1", "x", "L", None, 1, 1, None]]))
     run.result.skus[0].description = "Bad\x07Name"  # openpyxl cannot write control characters
     wb = load(build_export(run))
     assert wb["SKU Plan"]["C2"].value == "BadName"

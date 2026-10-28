@@ -138,7 +138,9 @@ def test_plan_all_counts_and_zero_forecast():
     from app.parsing import parse_input
     from app.sales import actual_cartons, parse_sales
     fix = Path(__file__).parent / "fixtures"
-    parsed = parse_input((fix / "sample_input.xlsx").read_bytes())
+    from app.stock import apply_stock, parse_pdg, parse_pg
+    raw = (fix / "sample_input.xlsx").read_bytes()
+    parsed = apply_stock(parse_input(raw), parse_pg(raw), parse_pdg(raw))[0]
     actual = actual_cartons(parse_sales((fix / "sales_export.xlsx").read_bytes()), parsed)
     result = plan_all(parsed, actual, {}, parsed.default_plan_date)
     assert result.counts["HOLDING_NOT_SET"] == 212
@@ -152,7 +154,9 @@ def test_plan_all_counts_have_exactly_the_five_keys():
     from app.models import ActualSales
     from app.parsing import parse_input
     from pathlib import Path
-    parsed = parse_input((Path(__file__).parent / "fixtures" / "sample_input.xlsx").read_bytes())
+    from app.stock import apply_stock, parse_pdg, parse_pg
+    raw = (Path(__file__).parent / "fixtures" / "sample_input.xlsx").read_bytes()
+    parsed = apply_stock(parse_input(raw), parse_pg(raw), parse_pdg(raw))[0]
     actual = ActualSales(months=ACT, cartons={}, skus_with_sales=0, warnings=[])
     result = plan_all(parsed, actual, {"Alpha Foods": 2}, parsed.default_plan_date)
     assert set(result.counts) == {"TO_ORDER", "NO_ORDER_NEEDED", "HOLDING_NOT_SET", "NO_DEMAND_DATA",

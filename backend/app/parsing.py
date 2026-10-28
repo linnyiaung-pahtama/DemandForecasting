@@ -16,10 +16,12 @@ REQUIRED_COLUMNS = [
     "MOQ",
     "Shelf Life month",
     "Lead Time",
-    "Total Sellable (Ctns)",
-    "Total Non-Sellable (Ctns)",
     "SIT Ctns (pending order)",
 ]
+
+# Stock now comes from the PDG Stock List and PG Expiry Check files; these Data columns are never read.
+STOCK_COLUMNS = ["Sellable (PG)", "Sellable (PDG)", "Total Sellable (Ctns)",
+                 "Non-Sellable (PG)", "Non-Sellable (PDG)", "Total Non-Sellable (Ctns)"]
 
 MONTH_NAMES = ["january", "february", "march", "april", "may", "june", "july", "august",
                "september", "october", "november", "december"]
@@ -112,6 +114,13 @@ def parse_input(data: bytes) -> ParsedInput:
     if missing:
         raise InputFileError("The 'Data' sheet is missing required column(s): " + ", ".join(missing) + ".")
 
+    warnings: list[ParseWarning] = []
+    if any(_norm(name) in columns for name in STOCK_COLUMNS):
+        warnings.append(ParseWarning(
+            sap_code=None, column=None,
+            message="Stock columns in the Data sheet are ignored; "
+                    "stock comes from the PDG Stock List and PG Expiry Check files."))
+
     mtd_cols = [(n, c) for n, c in columns.items() if MTD_RE.match(n)]
     if len(mtd_cols) != 1:
         raise InputFileError(
@@ -130,7 +139,6 @@ def parse_input(data: bytes) -> ParsedInput:
     mtd_month = f"{mtd_end.year:04d}-{mtd_end.month:02d}"
 
     forecast_cols: list[tuple[str, int, str]] = []  # (YYYY-MM, column index, header text)
-    warnings: list[ParseWarning] = []
     for n, (i, text) in columns.items():
         fm = FORECAST_RE.match(n)
         if not fm:
@@ -183,8 +191,6 @@ def parse_input(data: bytes) -> ParsedInput:
     c_moq, h_moq = col("MOQ")
     c_shelf, h_shelf = col("Shelf Life month")
     c_lead, h_lead = col("Lead Time")
-    c_sell, h_sell = col("Total Sellable (Ctns)")
-    c_non, h_non = col("Total Non-Sellable (Ctns)")
     c_sit, h_sit = col("SIT Ctns (pending order)")
 
     skus: list[SkuInput] = []
@@ -259,11 +265,10 @@ def parse_input(data: bytes) -> ParsedInput:
                 fc = 0.0
             forecast[key] = fc
 
-        sellable, sit = num(c_sell, h_sell), num(c_sit, h_sit)
-        for value, header in ((sellable, h_sell), (sit, h_sit)):
-            if value < 0:
-                warnings.append(ParseWarning(sap_code=sap, column=header,
-                                             message="negative stock — check the stock report"))
+        sit = num(c_sit, h_sit)
+        if sit < 0:
+            warnings.append(ParseWarning(sap_code=sap, column=h_sit,
+                                         message="negative stock — check the stock report"))
 
         skus.append(SkuInput(
             sap_code=sap,
@@ -273,8 +278,8 @@ def parse_input(data: bytes) -> ParsedInput:
             moq=num(c_moq, h_moq),
             shelf_life_months=shelf,
             lead_time_days=lead,
-            sellable=sellable,
-            non_sellable=num(c_non, h_non),
+            sellable=0.0,
+            non_sellable=0.0,
             sit=sit,
             mtd_sales=mtd,
             forecast=forecast,

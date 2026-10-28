@@ -22,6 +22,10 @@ class SkuInput(BaseModel):
     sit: float
     mtd_sales: float  # raw value, may be negative
     forecast: dict[str, float]  # "YYYY-MM" -> cartons, ordered by month
+    pg_sellable: float | None = None  # None only in runs saved before stock came from the stock reports
+    pdg_sellable: float | None = None
+    pg_non_sellable: float | None = None
+    pdg_non_sellable: float | None = None
 
 
 class ParseWarning(BaseModel):
@@ -69,6 +73,21 @@ class StockReport(BaseModel):
     as_of: date | None  # PDG: Printed_Date; PG: most common (expired Date - Day Left)
     skipped_codes: list[str]  # codes of rows skipped for an unreadable quantity (distinct, in file order)
     warnings: list[ParseWarning]  # file-level; every message starts with the report name
+
+
+class StockFileSummary(BaseModel):
+    source: StockSource
+    as_of: date | None
+    skus_with_stock: int  # Data SKUs with at least one line in this file
+    sellable_cartons: float  # summed over Data SKUs only
+    non_sellable_cartons: float
+
+
+class StockResult(BaseModel):
+    pg: StockFileSummary
+    pdg: StockFileSummary
+    skus_with_stock: int  # Data SKUs with a line in either file
+    warnings: list[ParseWarning]  # report warnings (PG then PDG), then merge warnings
 
 
 class InspectResponse(BaseModel):

@@ -7,7 +7,9 @@ from xml.etree import ElementTree
 
 from openpyxl import load_workbook
 
-from app.models import InputFileError, ParseWarning, StockLine, StockReport, StockSource
+from app.models import (InputFileError, ParsedInput, ParseWarning, StockFileSummary, StockLine, StockReport,
+                        StockResult, StockSource)
+from app.months import month_label
 from app.parsing import HEADER_SEARCH_ROWS, _is_number, _norm, _to_number, find_header_row
 
 PG_NAME = "PG Expiry Check"
@@ -177,3 +179,80 @@ def parse_pdg(data: bytes) -> StockReport:
     return _parse(data, "PDG", PDG_NAME, _PDG_REQUIRED,
                   "No sheet has StockCode, Location, Bin_Qty, U_Ratio and Sell or Non columns "
                   "(looked in the first 10 rows of each sheet).")
+
+
+# ---- stock totals per Data SKU ------------------------------------------------------------------
+
+DATE_TOLERANCE_DAYS = 3  # a stock report this many days from the plan date (or fewer) is not flagged
+
+
+def _totals(report: StockReport, data_codes: set[str]) -> dict[str, list[float]]:
+    """Data SKU code -> [sellable cartons, non-sellable cartons] over the report's lines."""
+    totals: dict[str, list[float]] = {}
+    for line in report.lines:
+        if line.code in data_codes:
+            totals.setdefault(line.code, [0.0, 0.0])[0 if line.sellable else 1] += line.cartons
+    return totals
+
+
+def apply_stock(parsed: ParsedInput, pg: StockReport, pdg: StockReport) -> tuple[ParsedInput, StockResult]:
+    """A copy of parsed whose SKUs carry the PG and PDG stock, plus a summary and the merge warnings."""
+    data_codes = {s.sap_code for s in parsed.skus}
+    pg_totals, pdg_totals = _totals(pg, data_codes), _totals(pdg, data_codes)
+
+    skus = []
+    for sku in parsed.skus:
+        pg_sell, pg_non = pg_totals.get(sku.sap_code, (0.0, 0.0))
+        pdg_sell, pdg_non = pdg_totals.get(sku.sap_code, (0.0, 0.0))
+        skus.append(sku.model_copy(update={
+            "sellable": pg_sell + pdg_sell, "non_sellable": pg_non + pdg_non,
+            "pg_sellable": pg_sell, "pdg_sellable": pdg_sell,
+            "pg_non_sellable": pg_non, "pdg_non_sellable": pdg_non}))
+
+    warnings = [*pg.warnings, *pdg.warnings]
+    summaries = []
+    for report, name, totals in ((pg, PG_NAME, pg_totals), (pdg, PDG_NAME, pdg_totals)):
+        not_in_data = {line.code for line in report.lines if line.code not in data_codes}
+        if not_in_data:
+            warnings.append(ParseWarning(sap_code=None, column=None,
+                                         message=f"{name}: {len(not_in_data)} stock codes are not in the Data sheet; ignored"))
+        if not totals:
+            warnings.append(ParseWarning(
+                sap_code=None, column=None,
+                message=f"{name} has no stock for any SKU in the Data sheet — check that it is the right report"))
+        for code in report.skipped_codes:
+            if code in data_codes:
+                warnings.append(ParseWarning(
+                    sap_code=code, column="Stock",
+                    message=f"{name}: a stock row for this SKU could not be read and was skipped"))
+        summaries.append(StockFileSummary(
+            source=report.source, as_of=report.as_of, skus_with_stock=len(totals),
+            sellable_cartons=sum(t[0] for t in totals.values()),
+            non_sellable_cartons=sum(t[1] for t in totals.values())))
+    for sku in skus:
+        if sku.sellable < 0:
+            warnings.append(ParseWarning(sap_code=sku.sap_code, column="Total Sellable",
+                                         message="negative stock — check the stock report"))
+
+    result = StockResult(pg=summaries[0], pdg=summaries[1],
+                         skus_with_stock=len(pg_totals.keys() | pdg_totals.keys()), warnings=warnings)
+    return parsed.model_copy(update={"skus": skus}), result
+
+
+def _date_text(d: date) -> str:
+    return f"{d.day} {month_label(f'{d.year:04d}-{d.month:02d}')}"  # e.g. "2 Oct 2026"
+
+
+def stock_date_warnings(stock: StockResult, plan_date: date) -> list[ParseWarning]:
+    """Warnings for stock reports dated more than DATE_TOLERANCE_DAYS from the plan date (PDG first, then PG)."""
+    warnings = []
+    for summary, template in ((stock.pdg, "PDG Stock List was printed on {d}, {n} days {rel} the plan date"),
+                              (stock.pg, "PG Expiry Check is as of {d}, {n} days {rel} the plan date")):
+        if summary.as_of is None:
+            continue
+        gap = (plan_date - summary.as_of).days
+        if abs(gap) > DATE_TOLERANCE_DAYS:
+            warnings.append(ParseWarning(
+                sap_code=None, column=None,
+                message=template.format(d=_date_text(summary.as_of), n=abs(gap), rel="before" if gap > 0 else "after")))
+    return warnings
