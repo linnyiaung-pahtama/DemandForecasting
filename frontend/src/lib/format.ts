@@ -21,6 +21,12 @@ export function fmtDate(iso: string): string {
   return `${Number(day)} ${monthName} ${year}`
 }
 
+/** "2026-10-12T09:05:33" -> "09:05". An ISO string without a time part is returned as "". */
+export function fmtTime(iso: string): string {
+  const match = /[T ](\d{2}:\d{2})/.exec(iso)
+  return match ? match[1] : ''
+}
+
 /** "2026-07" -> "Jul 2026". An unrecognised key is returned unchanged. */
 export function monthLabel(key: string): string {
   const match = /^(\d{4})-(\d{2})$/.exec(key)

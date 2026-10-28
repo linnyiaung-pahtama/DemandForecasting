@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fmtDate, fmtQty, monthLabel, orderExplanation, statusLabel } from './format'
+import { fmtDate, fmtQty, fmtTime, monthLabel, orderExplanation, statusLabel } from './format'
 import type { DemandValue, SkuResult } from '../types'
 
 describe('monthLabel', () => {
@@ -228,5 +228,16 @@ describe('orderExplanation', () => {
     const r: SkuResult = { ...worked, lead_time_days: null, next_calc_date: null }
     const lines = orderExplanation(r, '2026-10-14')
     expect(lines[lines.length - 1]).toBe('Next calculation date: no lead time')
+  })
+})
+
+describe('fmtTime', () => {
+  it('returns HH:MM from an ISO date-time', () => {
+    expect(fmtTime('2026-10-12T09:05:33')).toBe('09:05')
+    expect(fmtTime('2026-10-12T21:40:00+08:00')).toBe('21:40')
+  })
+
+  it('returns an empty string when there is no time', () => {
+    expect(fmtTime('2026-10-12')).toBe('')
   })
 })
