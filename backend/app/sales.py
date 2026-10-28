@@ -1,4 +1,5 @@
 """Parser for admin's sales export, and its conversion from pieces to cartons."""
+from datetime import date
 from io import BytesIO
 
 from openpyxl import load_workbook
@@ -20,6 +21,25 @@ def _find_header(rows: list[tuple]) -> tuple[int, dict[str, int]] | None:
         if all(_norm(name) in columns for name in REQUIRED_COLUMNS):
             return i, columns
     return None
+
+
+def _year_month(year_cell, month_cell) -> tuple[int, int] | None:
+    """(year, month) from a sales row, or None if unreadable.
+
+    Month may be a name (Jul, July, Sept), a number 1-12 (also as text), or an Excel date/datetime,
+    in which case the date's own month and year are used and the Year cell is ignored.
+    """
+    if isinstance(month_cell, date):  # datetime is a date too
+        return month_cell.year, month_cell.month
+    year = _to_number(year_cell)
+    if year is None or year != int(year) or not 1000 <= year <= 9999:
+        return None
+    number = _to_number(month_cell)
+    if number is not None:
+        month = int(number) if number == int(number) and 1 <= number <= 12 else None
+    else:
+        month = _month_number(_norm(month_cell))
+    return None if month is None else (int(year), month)
 
 
 def parse_sales(data: bytes) -> SalesExport:
@@ -46,6 +66,7 @@ def parse_sales(data: bytes) -> SalesExport:
     pieces: dict[str, dict[str, float]] = {}
     months: set[str] = set()
     warnings: list[ParseWarning] = []
+    skipped = 0
     for row in rows[header_idx + 1:]:
         def cell(i: int):
             return row[i] if i < len(row) else None
@@ -55,13 +76,14 @@ def parse_sales(data: bytes) -> SalesExport:
             continue
         item = str(int(raw_item)) if _is_number(raw_item) else str(raw_item).strip()
 
-        year, month = _to_number(cell(c_year)), _month_number(_norm(cell(c_month)))
-        if year is None or month is None or year != int(year) or not 1000 <= year <= 9999:
+        year_month = _year_month(cell(c_year), cell(c_month))
+        if year_month is None:
+            skipped += 1
             warnings.append(ParseWarning(
                 sap_code=item, column=None,
                 message=f"could not read the year/month ({cell(c_year)!r} / {cell(c_month)!r}); row skipped"))
             continue
-        key = f"{int(year):04d}-{month:02d}"
+        key = f"{year_month[0]:04d}-{year_month[1]:02d}"
 
         raw_qty = cell(c_qty)
         qty = _to_number(raw_qty)
@@ -75,7 +97,7 @@ def parse_sales(data: bytes) -> SalesExport:
         by_month = pieces.setdefault(item, {})
         by_month[key] = by_month.get(key, 0.0) + qty
 
-    return SalesExport(pieces=pieces, months=sorted(months), warnings=warnings)
+    return SalesExport(pieces=pieces, months=sorted(months), warnings=warnings, skipped_rows=skipped)
 
 
 def actual_cartons(export: SalesExport, parsed: ParsedInput) -> ActualSales:
@@ -84,7 +106,12 @@ def actual_cartons(export: SalesExport, parsed: ParsedInput) -> ActualSales:
     present = [m for m in actual_months if m in export.months]
     if not present:
         labels = ", ".join(month_label(m) for m in actual_months)
-        raise InputFileError(f"The sales export has no rows for {labels} (the 3 months before the MTD month).")
+        detail = ""
+        if export.skipped_rows:
+            noun = "row" if export.skipped_rows == 1 else "rows"
+            detail = f" ({export.skipped_rows} {noun} had an unreadable year/month)"
+        raise InputFileError(
+            f"The sales export has no rows for {labels} (the 3 months before the MTD month).{detail}")
 
     warnings: list[ParseWarning] = list(export.warnings)
     for m in actual_months:

@@ -64,3 +64,36 @@ def test_out_of_range_year_is_skipped_with_warning():
     assert list(ex.pieces) == ["A3"] and ex.months == ["2026-07"]
     assert [w.sap_code for w in ex.warnings] == ["A1", "A2"]
     assert all("year/month" in w.message for w in ex.warnings)
+
+
+def test_integer_and_numeric_text_months_are_accepted():
+    ex = parse_sales(make_sales_workbook([ROW("A1", 7, 40), ROW("A1", 8.0, 10), ROW("A2", "9", 5)]))
+    assert ex.pieces == {"A1": {"2026-07": 40, "2026-08": 10}, "A2": {"2026-09": 5}}
+    assert ex.warnings == [] and ex.skipped_rows == 0
+
+
+def test_out_of_range_integer_month_is_skipped():
+    ex = parse_sales(make_sales_workbook([ROW("A1", 13, 40), ROW("A2", 0, 40), ROW("A3", 7.5, 40), ROW("A4", 7, 40)]))
+    assert list(ex.pieces) == ["A4"] and ex.skipped_rows == 3 and len(ex.warnings) == 3
+
+
+def test_date_typed_month_uses_its_month_and_year():
+    from datetime import date, datetime
+    ex = parse_sales(make_sales_workbook([ROW("A1", datetime(2026, 7, 1), 40, year=None),
+                                          ROW("A1", date(2026, 8, 15), 10, year=2026),
+                                          ROW("A1", datetime(2026, 9, 1), 5, year="n/a")]))
+    assert ex.pieces == {"A1": {"2026-07": 40, "2026-08": 10, "2026-09": 5}}
+    assert ex.months == ["2026-07", "2026-08", "2026-09"] and ex.skipped_rows == 0
+
+
+def test_no_actual_months_message_mentions_unreadable_rows():
+    ex = parse_sales(make_sales_workbook([ROW("A1", "Nov", 40), ROW("A2", "Jul", 5, year="x"), ROW("A3", "??", 5)]))
+    assert ex.skipped_rows == 2
+    with pytest.raises(InputFileError, match=r"Jul 2026.*\(2 rows had an unreadable year/month\)"):
+        actual_cartons(ex, DATA)
+
+
+def test_no_actual_months_message_without_skipped_rows_is_unchanged():
+    with pytest.raises(InputFileError) as err:
+        actual_cartons(parse_sales(make_sales_workbook([ROW("A1", "Nov", 40)])), DATA)
+    assert "unreadable" not in str(err.value)

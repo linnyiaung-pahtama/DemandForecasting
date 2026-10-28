@@ -44,6 +44,7 @@ class SalesExport(BaseModel):
     pieces: dict[str, dict[str, float]]  # sap code -> "YYYY-MM" -> summed pieces
     months: list[str]  # sorted "YYYY-MM" months with at least one row
     warnings: list[ParseWarning]
+    skipped_rows: int = 0  # rows skipped because their year/month could not be read
 
 
 class ActualSales(BaseModel):
