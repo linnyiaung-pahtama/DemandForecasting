@@ -25,3 +25,21 @@ def make_workbook(rows: list[list], headers: list[str] | None = None, sheet: str
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+SALES_HEADERS = ["Company", "BranchName", "Principal", "Brand", "itemCode", "Itemname", "Year", "Month", "Qty", "Amount"]
+
+
+def make_sales_workbook(rows: list[list], headers: list[str] | None = None, sheet: str = "Sheet1") -> bytes:
+    """Build a sales-export xlsx in memory: headers on row 1, data from row 2."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet
+    for c, h in enumerate(headers if headers is not None else SALES_HEADERS, start=1):
+        ws.cell(row=1, column=c, value=h)
+    for r, row in enumerate(rows, start=2):
+        for c, v in enumerate(row, start=1):
+            ws.cell(row=r, column=c, value=v)
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()

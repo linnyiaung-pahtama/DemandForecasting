@@ -40,6 +40,19 @@ class ParsedInput(BaseModel):
     warnings: list[ParseWarning]
 
 
+class SalesExport(BaseModel):
+    pieces: dict[str, dict[str, float]]  # sap code -> "YYYY-MM" -> summed pieces
+    months: list[str]  # sorted "YYYY-MM" months with at least one row
+    warnings: list[ParseWarning]
+
+
+class ActualSales(BaseModel):
+    months: list[str]  # the 3 actual months, oldest first
+    cartons: dict[str, dict[str, float]]  # Data SAP code -> "YYYY-MM" -> cartons (months present in the export)
+    skus_with_sales: int  # Data SKUs with at least one export row in the actual months
+    warnings: list[ParseWarning]
+
+
 class SupplierSetting(BaseModel):
     supplier: str
     reorder_days: int
