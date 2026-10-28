@@ -2,17 +2,18 @@
 from datetime import date
 from pathlib import Path
 
+from typing import Any
+
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
 from app import config
-from app.holding import plan_all, plan_date_bounds, validate_plan_date
+from app.holding import forecast_window, plan_all, plan_date_bounds, validate_plan_date
 from app.export import XLSX_MEDIA_TYPE, build_export
 from app.models import (ActualSales, InputFileError, InspectResponse, ParsedInput, RunListItem,
                         RunRecord, SettingsLogEntry, SupplierHolding, SupplierSettingView,
                         SupplierSummary)
-from app.months import next_months
 from app.parsing import parse_input
 from app.repository import Repository
 from app.sales import actual_cartons, parse_sales
@@ -42,12 +43,22 @@ def _parse_plan_date(text: str | None) -> date | None:
         raise HTTPException(status_code=422, detail=f"Plan date '{text}' is not a valid date (use YYYY-MM-DD).") from exc
 
 
-def _validate_holding(item: SupplierHolding) -> None:
-    value = item.holding_months
-    if value is not None and not MIN_HOLDING <= value <= MAX_HOLDING:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Supplier '{item.supplier}': holding must be between 0.5 and 24 months, or blank.")
+def _parse_holdings(items: list[Any]) -> list[SupplierHolding]:
+    """Validate the raw PUT body so every bad value is reported with its supplier's name."""
+    holdings: list[SupplierHolding] = []
+    for raw in items:
+        if not isinstance(raw, dict) or not isinstance(raw.get("supplier"), str) or "holding_months" not in raw:
+            raise HTTPException(
+                status_code=422, detail="Each setting needs a supplier name and a holding_months value.")
+        name, value = raw["supplier"], raw["holding_months"]
+        is_number = isinstance(value, (int, float)) and not isinstance(value, bool)
+        if value is not None and not (is_number and MIN_HOLDING <= value <= MAX_HOLDING):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Supplier '{name}': holding must be between {MIN_HOLDING:g} and {MAX_HOLDING:g} "
+                       f"months, or blank.")
+        holdings.append(SupplierHolding(supplier=name, holding_months=value))
+    return holdings
 
 
 def create_app(db_path: Path = config.DB_PATH) -> FastAPI:
@@ -74,7 +85,7 @@ def create_app(db_path: Path = config.DB_PATH) -> FastAPI:
             file_name=data_file.filename or "", sales_file_name=sales_file.filename or "",
             sku_count=len(parsed.skus), supplier_count=len({s.supplier for s in parsed.skus}),
             forecast_months=parsed.forecast_months, actual_months=actual.months,
-            forecast_window=next_months(parsed.mtd_month, 3),
+            forecast_window=forecast_window(parsed),
             skus_with_sales=actual.skus_with_sales, mtd_label=parsed.mtd_label,
             mtd_end=parsed.mtd_end, default_plan_date=parsed.default_plan_date,
             min_plan_date=min_date, max_plan_date=max_date,
@@ -144,10 +155,8 @@ def create_app(db_path: Path = config.DB_PATH) -> FastAPI:
         return settings_views()
 
     @app.put("/api/settings", response_model=list[SupplierSettingView])
-    def put_settings(items: list[SupplierHolding]) -> list[SupplierSettingView]:
-        for item in items:
-            _validate_holding(item)
-        repo.save_holdings(items)
+    def put_settings(items: list[Any]) -> list[SupplierSettingView]:
+        repo.save_holdings(_parse_holdings(items))
         return settings_views()
 
     @app.get("/api/settings/log", response_model=list[SettingsLogEntry])

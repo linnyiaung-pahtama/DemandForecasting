@@ -56,7 +56,7 @@ def parse_sales(data: bytes) -> SalesExport:
         item = str(int(raw_item)) if _is_number(raw_item) else str(raw_item).strip()
 
         year, month = _to_number(cell(c_year)), _month_number(_norm(cell(c_month)))
-        if year is None or month is None or year != int(year):
+        if year is None or month is None or year != int(year) or not 1000 <= year <= 9999:
             warnings.append(ParseWarning(
                 sap_code=item, column=None,
                 message=f"could not read the year/month ({cell(c_year)!r} / {cell(c_month)!r}); row skipped"))

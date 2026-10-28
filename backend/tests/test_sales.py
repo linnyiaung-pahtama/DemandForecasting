@@ -56,3 +56,11 @@ def test_not_an_export_is_rejected():
         parse_sales((FIX / "sample_input.xlsx").read_bytes())    # the Data file
     with pytest.raises(InputFileError, match="xlsx"):
         parse_sales(b"not a workbook")
+
+
+def test_out_of_range_year_is_skipped_with_warning():
+    ex = parse_sales(make_sales_workbook([ROW("A1", "Jul", 40, year=-2026), ROW("A2", "Jul", 40, year=99999),
+                                          ROW("A3", "Jul", 40)]))
+    assert list(ex.pieces) == ["A3"] and ex.months == ["2026-07"]
+    assert [w.sap_code for w in ex.warnings] == ["A1", "A2"]
+    assert all("year/month" in w.message for w in ex.warnings)

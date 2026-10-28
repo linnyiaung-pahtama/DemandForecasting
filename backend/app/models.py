@@ -2,7 +2,7 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictFloat, StrictInt
 
 
 class InputFileError(Exception):
@@ -110,7 +110,7 @@ class SkuResult(BaseModel):
 
 class SupplierHolding(BaseModel):
     supplier: str
-    holding_months: float | None
+    holding_months: StrictFloat | StrictInt | None
 
 
 class SettingsLogEntry(BaseModel):

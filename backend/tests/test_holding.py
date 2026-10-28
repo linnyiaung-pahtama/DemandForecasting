@@ -131,3 +131,15 @@ def test_plan_all_counts_and_zero_forecast():
     zero = sum(1 for s in result.skus if s.zero_forecast)
     assert result.counts["ZERO_FORECAST"] == zero and zero > 0
     assert result.forecast_months == ["2026-10", "2026-11", "2026-12"]
+
+
+def test_plan_all_counts_have_exactly_the_five_keys():
+    from app.holding import plan_all
+    from app.models import ActualSales
+    from app.parsing import parse_input
+    from pathlib import Path
+    parsed = parse_input((Path(__file__).parent / "fixtures" / "sample_input.xlsx").read_bytes())
+    actual = ActualSales(months=ACT, cartons={}, skus_with_sales=0, warnings=[])
+    result = plan_all(parsed, actual, {"Alpha Foods": 2}, parsed.default_plan_date)
+    assert set(result.counts) == {"TO_ORDER", "NO_ORDER_NEEDED", "HOLDING_NOT_SET", "NO_DEMAND_DATA",
+                                  "ZERO_FORECAST"}

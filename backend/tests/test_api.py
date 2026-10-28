@@ -62,3 +62,71 @@ def test_plan_date_range_and_404s(client):
     assert client.post("/api/runs", files=files(), data={"plan_date": "2026-11-02"}).status_code == 422
     assert client.get("/api/runs/999").status_code == 404
     assert client.post("/api/runs/999/recalculate").status_code == 404
+
+
+def test_health(client):
+    assert client.get("/api/health").json() == {"status": "ok"}
+
+
+def test_recalculate_keeps_non_default_plan_date(client):
+    run = client.post("/api/runs", files=files(), data={"plan_date": "2026-10-20"}).json()
+    assert run["plan_date"] == "2026-10-20"
+    rec = client.post(f"/api/runs/{run['id']}/recalculate").json()
+    assert rec["plan_date"] == "2026-10-20" and rec["result"]["plan_date"] == "2026-10-20"
+    assert client.get(f"/api/runs/{run['id']}").json()["plan_date"] == "2026-10-20"
+
+
+def test_plan_date_parsing_and_upper_bound(client):
+    assert client.post("/api/runs", files=files(), data={"plan_date": "not-a-date"}).status_code == 422
+    assert client.post("/api/runs", files=files(), data={"plan_date": "2026-10-31"}).status_code == 200
+
+
+def test_suppliers_route(client):
+    run = client.post("/api/runs", files=files()).json()
+    r = client.get(f"/api/runs/{run['id']}/suppliers")
+    assert r.status_code == 200 and len(r.json()) == 17
+    assert client.get("/api/runs/999/suppliers").status_code == 404
+
+
+def test_export_is_not_implemented_yet(client):
+    run = client.post("/api/runs", files=files()).json()
+    assert client.get(f"/api/runs/{run['id']}/export").status_code == 501
+
+
+def test_holding_bounds_accepted(client):
+    for ok in (0.5, 24, 1.5):
+        assert client.put("/api/settings", json=[{"supplier": "A", "holding_months": ok}]).status_code == 200
+
+
+def test_holding_error_names_supplier_and_rejects_non_numbers(client):
+    for bad in (0, 25, "abc", True, [3]):
+        r = client.put("/api/settings", json=[{"supplier": "Acme", "holding_months": bad}])
+        assert r.status_code == 422
+        assert r.json()["detail"] == "Supplier 'Acme': holding must be between 0.5 and 24 months, or blank."
+
+
+def test_failed_batch_saves_nothing(client):
+    client.post("/api/runs", files=files())
+    before = client.get("/api/settings").json()
+    r = client.put("/api/settings", json=[{"supplier": "CFC", "holding_months": 3},
+                                          {"supplier": "Bad", "holding_months": 99}])
+    assert r.status_code == 422
+    assert client.get("/api/settings").json() == before
+    assert client.get("/api/settings/log").json() == []
+
+
+def test_malformed_settings_body_returns_422(client):
+    assert client.put("/api/settings", json=[{"holding_months": 3}]).status_code == 422
+    assert client.put("/api/settings", json=["x"]).status_code == 422
+
+
+def test_negative_year_in_sales_export_is_not_a_server_error(client):
+    from tests.helpers import make_sales_workbook
+    row = ["PG", "Yangon", "P", "B", "3102111001", "x", -2026, "Jul", 40, 0]
+    bad = make_sales_workbook([row] + [["PG", "Yangon", "P", "B", "3102111001", "x", 2026, m, 40, 0]
+                                       for m in ("Jul", "Aug", "Sep")])
+    r = client.post("/api/inspect", files=files(sales=bad))
+    assert r.status_code == 200
+    assert any("year/month" in w["message"] for w in r.json()["warnings"])
+    only_bad = make_sales_workbook([row])
+    assert client.post("/api/inspect", files=files(sales=only_bad)).status_code == 400

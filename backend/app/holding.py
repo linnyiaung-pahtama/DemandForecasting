@@ -89,21 +89,29 @@ def validate_plan_date(parsed: ParsedInput, plan_date: date) -> None:
             f"({parsed.mtd_end.isoformat()}), so the plan date can be at most the end of that month.")
 
 
+ZERO_FORECAST_KEY = "ZERO_FORECAST"
+
+
+def forecast_window(parsed: ParsedInput) -> list[str]:
+    """The forecast months used: the MTD month and the next 2."""
+    return next_months(parsed.mtd_month, 3)
+
+
 def plan_all(parsed: ParsedInput, actual: ActualSales, holdings: dict[str, float],
              plan_date: date) -> HoldingPlan:
     """Plan every SKU in the Data file with the current supplier holdings."""
     actual_months = actual.months
-    forecast_months = next_months(parsed.mtd_month, 3)
+    forecast_months = forecast_window(parsed)
     skus = [plan_sku(sku, actual.cartons.get(sku.sap_code, {}), actual_months, forecast_months,
                      holdings.get(sku.supplier), plan_date) for sku in parsed.skus]
     suppliers = list(dict.fromkeys(sku.supplier for sku in parsed.skus))  # first-appearance order
     counts = {status.value: 0 for status in SkuStatus}
-    counts["ZERO_FORECAST"] = 0
+    counts[ZERO_FORECAST_KEY] = 0
     for result in skus:
         counts[result.status.value] += 1
-        counts["ZERO_FORECAST"] += result.zero_forecast
+        counts[ZERO_FORECAST_KEY] += result.zero_forecast
     return HoldingPlan(
         plan_date=plan_date, actual_months=actual_months, forecast_months=forecast_months,
         skus=skus,
         settings_used=[SupplierHolding(supplier=s, holding_months=holdings.get(s)) for s in suppliers],
-        blocked_suppliers=[s for s in suppliers if s not in holdings], counts=counts)
+        blocked_suppliers=[s for s in suppliers if holdings.get(s) is None], counts=counts)
