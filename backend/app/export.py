@@ -13,23 +13,26 @@ from app.summary import summarize_suppliers
 
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 DATE_FORMAT = "yyyy-mm-dd"
-FORMULA_STARTS = ("=", "+", "-", "@")
+TWO_DECIMALS = "0.00"
+ONE_DECIMAL = "0.0"
 
 
 def _safe(value):
     """Make a string cell safe to open in Excel: drop characters openpyxl rejects and stop it being read
-    as a formula. Numbers, dates and None pass through unchanged."""
+    as a formula (only a leading "=" makes Excel read text as one). Numbers, dates and None pass through
+    unchanged."""
     if not isinstance(value, str):
         return value
     value = ILLEGAL_CHARACTERS_RE.sub("", value)
-    return "'" + value if value.startswith(FORMULA_STARTS) else value
+    return "'" + value if value.startswith("=") else value
 
 
 def _yes_no(flag: bool) -> str:
     return "Yes" if flag else "No"
 
 
-def _write_sheet(ws: Worksheet, headers: list[str], rows: list[list]) -> None:
+def _write_sheet(ws: Worksheet, headers: list[str], rows: list[list],
+                 formats: dict[str, str] | None = None) -> None:
     ws.append(headers)
     for row in rows:
         ws.append([_safe(v) for v in row])
@@ -39,10 +42,13 @@ def _write_sheet(ws: Worksheet, headers: list[str], rows: list[list]) -> None:
     for idx, header in enumerate(headers, start=1):
         width = max([len(header)] + [len(str(r[idx - 1])) for r in rows if r[idx - 1] is not None])
         ws.column_dimensions[get_column_letter(idx)].width = min(max(width + 2, 10), 60)
+    column_formats = formats or {}
     for row in ws.iter_rows(min_row=2):
         for cell in row:
             if hasattr(cell.value, "year"):
                 cell.number_format = DATE_FORMAT
+            elif headers[cell.column - 1] in column_formats:
+                cell.number_format = column_formats[headers[cell.column - 1]]
 
 
 def build_export(run: RunRecord) -> bytes:
@@ -64,10 +70,12 @@ def build_export(run: RunRecord) -> bytes:
             sku.next_calc_date])
     ws = wb.active
     ws.title = "SKU Plan"
+    formats = {name: TWO_DECIMALS for name in ["Sellable", "SIT", "Available", *month_headers, "Buffer", "Target"]}
+    formats["Stock Cover (months)"] = ONE_DECIMAL
     _write_sheet(ws, ["Supplier", "SAP Code", "Description", "Status", "Zero Forecast", "Sellable", "SIT",
                       "Available", *month_headers, "Valid Values", "Buffer", "Holding (months)", "Target",
                       "Required", "MOQ", "MOQ Applied", "Order Qty", "Stock Cover (months)",
-                      "Lead Time (days)", "Next Calculation Date"], sku_rows)
+                      "Lead Time (days)", "Next Calculation Date"], sku_rows, formats)
 
     _write_sheet(wb.create_sheet("Supplier Summary"),
                  ["Supplier", "Holding (months)", "SKUs", "SKUs to Order", "Total Order Qty",

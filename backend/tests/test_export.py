@@ -83,7 +83,7 @@ def test_export_neutralises_formula_text():
     sales = make_sales_workbook(
         [["PG", "Yangon", "P", "B", "F1", "x", 2026, m, 40, 0] for m in ("Jul", "Aug", "Sep")])
     run = make_run(data, sales, {"Sup": 3},
-                   warnings=([ParseWarning(sap_code=None, column="-col", message="+oops @x")], []))
+                   warnings=([ParseWarning(sap_code=None, column="-col", message="=oops @x")], []))
     run.result.skus[0].description = "=SUM(A1)"
     run.result.skus[0].supplier = "=Evil"
     run.result.settings_used[0].supplier = "=Evil"
@@ -94,7 +94,28 @@ def test_export_neutralises_formula_text():
     assert wb["Supplier Summary"]["A2"].value == "'=Evil"
     assert wb["Settings Used"]["A2"].value == "'=Evil"
     warn = [c.value for c in wb["Warnings"][2]]
-    assert warn == ["Data file", None, "'-col", "'+oops @x"]
+    # only a leading "=" is neutralised; "-", "+" and "@" are ordinary text to Excel
+    assert warn == ["Data file", None, "-col", "'=oops @x"]
+
+
+def test_export_leaves_plus_minus_at_text_alone():
+    from app.export import _safe
+    assert [_safe(v) for v in ("-5 pcs", "+Tea", "@home", "=1+1", "a=b", None, 3)] == [
+        "-5 pcs", "+Tea", "@home", "'=1+1", "a=b", None, 3]
+
+
+def test_export_number_formats():
+    run = make_run(DATA, SALES, {"CFC": 3})
+    ws = load(build_export(run))["SKU Plan"]
+    header = [c.value for c in ws[1]]
+    row = next(r for r in ws.iter_rows(min_row=2) if r[1].value == "3102111001")
+    fmt = {h: c.number_format for h, c in zip(header, row)}
+    for name in ("Sellable", "SIT", "Available", "Jul 2026 Actual", "Aug 2026 Actual", "Sep 2026 Actual",
+                 "Oct 2026 Forecast", "Nov 2026 Forecast", "Dec 2026 Forecast", "Buffer", "Target"):
+        assert fmt[name] == "0.00", name
+    assert fmt["Stock Cover (months)"] == "0.0"
+    assert fmt["Next Calculation Date"] == "yyyy-mm-dd"
+    assert fmt["Order Qty"] == "General" and fmt["Valid Values"] == "General"
 
 
 def test_export_strips_illegal_characters_and_labels_warning_sources():
