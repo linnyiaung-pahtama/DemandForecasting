@@ -61,8 +61,9 @@ def _parse_holdings(items: list[Any]) -> list[SupplierHolding]:
     return holdings
 
 
-def create_app(db_path: Path = config.DB_PATH) -> FastAPI:
-    repo = Repository(db_path)
+def create_app(db_path: Path | None = None) -> FastAPI:
+    """App factory. Start the server with: uvicorn app.main:create_app --factory --app-dir backend"""
+    repo = Repository(db_path or config.DB_PATH)
     app = FastAPI(title="Order Plan Tool")
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"],
                        allow_methods=["*"], allow_headers=["*"])
@@ -162,5 +163,3 @@ def create_app(db_path: Path = config.DB_PATH) -> FastAPI:
 
     return app
 
-
-app = create_app()

@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS runs (
 
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
-    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    if conn.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 
 def _is_v1(db_path: Path) -> bool:

@@ -37,7 +37,7 @@ Open two terminals (PowerShell or Git Bash), both starting in the project folder
 Terminal 1, backend (port 8000):
 
 ```
-backend/.venv/Scripts/python -m uvicorn app.main:app --app-dir backend --port 8000
+backend/.venv/Scripts/python -m uvicorn app.main:create_app --factory --app-dir backend --port 8000
 ```
 
 Terminal 2, frontend (port 5173):
@@ -166,6 +166,8 @@ cd backend
 cd ..
 npm --prefix frontend test
 ```
+
+The backend tests run against a temporary database automatically (`backend/tests/conftest.py` sets `ORDERPLAN_DB` before the app is imported), so they never touch `backend/data/orderplan.db`.
 
 `npm --prefix frontend run build` type-checks and builds the frontend, and `npm --prefix frontend run lint` runs the linter.
 
