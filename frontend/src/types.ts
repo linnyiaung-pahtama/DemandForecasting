@@ -1,5 +1,5 @@
 // Mirrors backend/app/models.py field-for-field. Dates are ISO strings (YYYY-MM-DD),
-// datetimes are ISO date-time strings.
+// datetimes are ISO date-time strings. SalesExport is backend-only and has no type here.
 
 export interface SkuInput {
   sap_code: string
@@ -32,130 +32,116 @@ export interface ParsedInput {
   warnings: ParseWarning[]
 }
 
-export interface SupplierSetting {
-  supplier: string
-  reorder_days: number
-  target_days: number
-  is_default: boolean
+export interface ActualSales {
+  months: string[] // the 3 actual months, oldest first
+  cartons: Record<string, Record<string, number>> // Data SAP code -> "YYYY-MM" -> cartons (months present in the export)
+  skus_with_sales: number // Data SKUs with at least one export row in the actual months
+  warnings: ParseWarning[]
 }
 
-export type FlagCode =
-  | 'ORDER_NOW'
-  | 'STOCKOUT_RISK'
-  | 'EXCESS'
-  | 'EXPIRY_RISK'
-  | 'NO_FORECAST_HOLDING_STOCK'
-  | 'MTD_ABOVE_FORECAST'
-  | 'LEAD_TIME_EXCEEDS_REORDER'
-  | 'MOQ_EXCEEDS_SHELF_LIFE'
-  | 'MISSING_LEAD_TIME'
-
-export interface Flag {
-  code: FlagCode
-  message: string
+export interface InspectResponse {
+  file_name: string
+  sales_file_name: string
+  sku_count: number
+  supplier_count: number
+  forecast_months: string[] // all forecast columns found in the Data file
+  actual_months: string[] // the 3 months before the MTD month
+  forecast_window: string[] // the MTD month and the next 2
+  skus_with_sales: number
+  mtd_label: string
+  mtd_end: string
+  default_plan_date: string
+  min_plan_date: string
+  max_plan_date: string
+  warnings: ParseWarning[] // Data file warnings, then sales export warnings
 }
 
-export interface OrderReason {
-  on_hand: number
-  on_order: number
-  inventory_position: number
-  stock_at_arrival: number
-  reorder_qty: number
-  target_qty: number
-  raw_qty: number
-  moq_applied: boolean
-  shelf_life_cap: number | null
-  cap_applied: boolean
+export type SkuStatus = 'TO_ORDER' | 'NO_ORDER_NEEDED' | 'HOLDING_NOT_SET' | 'NO_DEMAND_DATA'
+
+export interface DemandValue {
+  month: string // "YYYY-MM"
+  source: 'actual' | 'forecast'
+  value: number | null
+  valid: boolean
 }
 
-export interface PlannedOrder {
-  order_date: string
-  arrival_date: string
-  qty: number
-  reason: OrderReason
-}
-
-export interface WeekProjection {
-  week: number // 1-based
-  start: string
-  end: string
-  demand: number
-  arrivals: number
-  closing_stock: number
-  lost: number
-  reorder_qty: number // at week start
-  target_qty: number // at week start
-}
-
-export interface SkuPlan {
+export interface SkuResult {
   sap_code: string
   supplier: string
   description: string
+  packing_size: number | null
   lead_time_days: number | null
   moq: number
-  shelf_life_months: number | null
   sellable: number
-  non_sellable: number
   sit: number
-  starting_stock: number
-  days_of_cover: number | null
-  total_forecast: number
-  orders: PlannedOrder[]
-  weeks: WeekProjection[]
-  flags: Flag[]
-  stockout_days: number
-  stockout_qty: number
-  first_stockout_date: string | null
+  available: number
+  demand_values: DemandValue[] // actuals then forecasts, oldest first
+  valid_count: number
+  buffer: number | null
+  holding_months: number | null
+  target: number | null
+  required: number | null
+  order_qty: number | null
+  moq_applied: boolean
+  stock_cover_months: number | null
+  next_calc_date: string | null
+  status: SkuStatus
+  zero_forecast: boolean
 }
 
-export interface SupplierSummary {
+export interface SupplierHolding {
   supplier: string
-  reorder_days: number
-  target_days: number
-  is_default: boolean
-  sku_count: number
-  skus_to_order: number
-  cartons_in_window: number
-  earliest_order_date: string | null // covers ALL of the supplier's orders
-  flag_counts: Record<string, number>
-  max_lead_time_days: number | null
+  holding_months: number | null
 }
 
-export interface PlanResult {
+export interface SettingsLogEntry {
+  id: number
+  supplier: string
+  old_value: number | null
+  new_value: number | null
+  changed_at: string
+}
+
+export interface HoldingPlan {
   plan_date: string
-  skus: SkuPlan[]
-  settings_used: SupplierSetting[]
-  new_suppliers: string[]
-  flag_counts: Record<string, number>
+  actual_months: string[]
+  forecast_months: string[] // the 3 used
+  skus: SkuResult[]
+  settings_used: SupplierHolding[]
+  blocked_suppliers: string[]
+  counts: Record<string, number> // TO_ORDER, NO_ORDER_NEEDED, HOLDING_NOT_SET, NO_DEMAND_DATA, ZERO_FORECAST
 }
 
 export interface RunListItem {
   id: number
   created_at: string
   file_name: string
+  sales_file_name: string
   plan_date: string
   sku_count: number
 }
 
 export interface RunRecord extends RunListItem {
   parsed: ParsedInput
-  result: PlanResult
+  actual: ActualSales
+  result: HoldingPlan
 }
 
-export interface SupplierSettingView extends SupplierSetting {
+export interface SupplierSummary {
+  supplier: string
+  holding_months: number | null
+  sku_count: number
+  skus_to_order: number
+  total_order_qty: number
+  blocked_skus: number
+  no_demand_skus: number
+  zero_forecast_skus: number
   max_lead_time_days: number | null
-  sku_count: number
 }
 
-export interface InspectResponse {
-  file_name: string
+export interface SupplierSettingView {
+  supplier: string
+  holding_months: number | null
   sku_count: number
-  supplier_count: number
-  forecast_months: string[]
-  mtd_label: string
-  mtd_end: string
-  default_plan_date: string
-  min_plan_date: string
-  max_plan_date: string
-  warnings: ParseWarning[]
+  max_lead_time_days: number | null
 }

@@ -2,7 +2,8 @@ import type {
   InspectResponse,
   RunListItem,
   RunRecord,
-  SupplierSetting,
+  SettingsLogEntry,
+  SupplierHolding,
   SupplierSettingView,
   SupplierSummary,
 } from './types'
@@ -67,15 +68,19 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T
 }
 
-export function inspectFile(file: File): Promise<InspectResponse> {
+function filesForm(dataFile: File, salesFile: File): FormData {
   const form = new FormData()
-  form.append('file', file)
-  return request<InspectResponse>('/api/inspect', { method: 'POST', body: form })
+  form.append('data_file', dataFile)
+  form.append('sales_file', salesFile)
+  return form
 }
 
-export function createRun(file: File, planDate?: string): Promise<RunRecord> {
-  const form = new FormData()
-  form.append('file', file)
+export function inspectFiles(dataFile: File, salesFile: File): Promise<InspectResponse> {
+  return request<InspectResponse>('/api/inspect', { method: 'POST', body: filesForm(dataFile, salesFile) })
+}
+
+export function createRun(dataFile: File, salesFile: File, planDate?: string): Promise<RunRecord> {
+  const form = filesForm(dataFile, salesFile)
   if (planDate) form.append('plan_date', planDate)
   return request<RunRecord>('/api/runs', { method: 'POST', body: form })
 }
@@ -92,15 +97,15 @@ export function recalculate(id: number): Promise<RunRecord> {
   return request<RunRecord>(`/api/runs/${id}/recalculate`, { method: 'POST' })
 }
 
-export function getSupplierSummary(id: number, windowWeeks: number): Promise<SupplierSummary[]> {
-  return request<SupplierSummary[]>(`/api/runs/${id}/suppliers?window_weeks=${windowWeeks}`)
+export function getSupplierSummary(id: number): Promise<SupplierSummary[]> {
+  return request<SupplierSummary[]>(`/api/runs/${id}/suppliers`)
 }
 
 export function getSettings(): Promise<SupplierSettingView[]> {
   return request<SupplierSettingView[]>('/api/settings')
 }
 
-export function saveSettings(items: SupplierSetting[]): Promise<SupplierSettingView[]> {
+export function saveSettings(items: SupplierHolding[]): Promise<SupplierSettingView[]> {
   return request<SupplierSettingView[]>('/api/settings', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -108,6 +113,10 @@ export function saveSettings(items: SupplierSetting[]): Promise<SupplierSettingV
   })
 }
 
-export function exportUrl(id: number, windowWeeks: number): string {
-  return `/api/runs/${id}/export?window_weeks=${windowWeeks}`
+export function getSettingsLog(): Promise<SettingsLogEntry[]> {
+  return request<SettingsLogEntry[]>('/api/settings/log')
+}
+
+export function exportUrl(id: number): string {
+  return `/api/runs/${id}/export`
 }

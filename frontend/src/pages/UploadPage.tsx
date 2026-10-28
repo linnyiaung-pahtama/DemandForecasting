@@ -1,43 +1,59 @@
-import { useState } from 'react'
-import type { ChangeEvent } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { createRun, errorText, inspectFile } from '../api'
-import { fmtDate } from '../lib/format'
+import { createRun, errorText, inspectFiles } from '../api'
+import { fmtDate, monthLabel } from '../lib/format'
 import type { InspectResponse } from '../types'
+
+function monthRange(months: string[]): string {
+  if (months.length === 0) return 'none'
+  if (months.length === 1) return monthLabel(months[0])
+  return `${monthLabel(months[0])} – ${monthLabel(months[months.length - 1])}`
+}
 
 export default function UploadPage() {
   const navigate = useNavigate()
-  const [file, setFile] = useState<File | null>(null)
+  const [dataFile, setDataFile] = useState<File | null>(null)
+  const [salesFile, setSalesFile] = useState<File | null>(null)
   const [info, setInfo] = useState<InspectResponse | null>(null)
   const [planDate, setPlanDate] = useState('')
   const [inspecting, setInspecting] = useState(false)
   const [calculating, setCalculating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  async function onFileChange(e: ChangeEvent<HTMLInputElement>) {
-    const chosen = e.target.files?.[0] ?? null
-    setFile(chosen)
+  // Inspect whenever both files are chosen or either changes. The cleanup flag drops a
+  // response that arrives after the files have changed again.
+  useEffect(() => {
     setInfo(null)
     setError(null)
-    if (!chosen) return
-    setInspecting(true)
-    try {
-      const result = await inspectFile(chosen)
-      setInfo(result)
-      setPlanDate(result.default_plan_date)
-    } catch (err) {
-      setError(errorText(err))
-    } finally {
+    if (!dataFile || !salesFile) {
       setInspecting(false)
+      return
     }
-  }
+    let current = true
+    setInspecting(true)
+    inspectFiles(dataFile, salesFile)
+      .then((result) => {
+        if (!current) return
+        setInfo(result)
+        setPlanDate(result.default_plan_date)
+        setInspecting(false)
+      })
+      .catch((err) => {
+        if (!current) return
+        setError(errorText(err))
+        setInspecting(false)
+      })
+    return () => {
+      current = false
+    }
+  }, [dataFile, salesFile])
 
   async function onCalculate() {
-    if (!file || !info) return
+    if (!dataFile || !salesFile || !info) return
     setCalculating(true)
     setError(null)
     try {
-      const run = await createRun(file, planDate || undefined)
+      const run = await createRun(dataFile, salesFile, planDate || undefined)
       navigate(`/runs/${run.id}`)
     } catch (err) {
       setError(errorText(err))
@@ -45,21 +61,34 @@ export default function UploadPage() {
     }
   }
 
-  const months = info?.forecast_months ?? []
-  const monthRange =
-    months.length === 0
-      ? 'none'
-      : months.length === 1
-        ? months[0]
-        : `${months[0]} to ${months[months.length - 1]} (${months.length} months)`
-
   return (
     <div className="stack">
       <div className="card">
         <h2>New plan</h2>
-        <p className="muted">Choose the planner's Excel forecast file (.xlsx). Only the Data sheet is read.</p>
-        <input type="file" accept=".xlsx" onChange={onFileChange} disabled={calculating} />
-        {inspecting && <p className="muted">Reading file…</p>}
+        <p className="muted">
+          Choose the planner's Excel forecast file (only the Data sheet is read) and the sales export.
+        </p>
+        <div className="field">
+          <label htmlFor="data-file">Data file (.xlsx)</label>
+          <input
+            id="data-file"
+            type="file"
+            accept=".xlsx"
+            onChange={(e) => setDataFile(e.target.files?.[0] ?? null)}
+            disabled={calculating}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="sales-file">Sales export (.xlsx)</label>
+          <input
+            id="sales-file"
+            type="file"
+            accept=".xlsx"
+            onChange={(e) => setSalesFile(e.target.files?.[0] ?? null)}
+            disabled={calculating}
+          />
+        </div>
+        {inspecting && <p className="muted">Reading files…</p>}
       </div>
 
       {error && (
@@ -70,7 +99,9 @@ export default function UploadPage() {
 
       {info && (
         <div className="card">
-          <h2>{info.file_name}</h2>
+          <h2>
+            {info.file_name} + {info.sales_file_name}
+          </h2>
           <dl className="facts">
             <div>
               <dt>SKUs</dt>
@@ -81,14 +112,17 @@ export default function UploadPage() {
               <dd>{info.supplier_count}</dd>
             </div>
             <div>
-              <dt>MTD column</dt>
-              <dd>{info.mtd_label}</dd>
+              <dt>Actual months</dt>
+              <dd>{monthRange(info.actual_months)}</dd>
             </div>
             <div>
               <dt>Forecast months</dt>
-              <dd>{monthRange}</dd>
+              <dd>{monthRange(info.forecast_window)}</dd>
             </div>
           </dl>
+          <p>
+            {info.skus_with_sales} of {info.sku_count} SKUs have actual sales
+          </p>
 
           <div className="field">
             <label htmlFor="plan-date">Plan date</label>

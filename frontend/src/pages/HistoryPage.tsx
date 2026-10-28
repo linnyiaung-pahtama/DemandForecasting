@@ -34,7 +34,7 @@ export default function HistoryPage() {
         !error && <p className="muted">Loading runs…</p>
       ) : runs.length === 0 ? (
         <p className="muted">
-          No runs yet. <Link to="/">Upload a forecast</Link> to create one.
+          No runs yet. <Link to="/">Upload files</Link> to create one.
         </p>
       ) : (
         <div className="table-wrap">
@@ -43,7 +43,8 @@ export default function HistoryPage() {
               <tr>
                 <th className="num">Run #</th>
                 <th>Created</th>
-                <th>File</th>
+                <th>Data file</th>
+                <th>Sales export</th>
                 <th>Plan date</th>
                 <th className="num">SKUs</th>
               </tr>
@@ -60,6 +61,7 @@ export default function HistoryPage() {
                   <td>
                     <Link to={`/runs/${r.id}`}>{r.file_name}</Link>
                   </td>
+                  <td>{r.sales_file_name}</td>
                   <td>{fmtDate(r.plan_date)}</td>
                   <td className="num">{r.sku_count}</td>
                 </tr>
