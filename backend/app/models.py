@@ -218,3 +218,41 @@ class SkuResult(BaseModel):
     next_calc_date: date | None
     status: SkuStatus
     zero_forecast: bool
+
+
+class SupplierHolding(BaseModel):
+    supplier: str
+    holding_months: float | None
+
+
+class SettingsLogEntry(BaseModel):
+    id: int
+    supplier: str
+    old_value: float | None
+    new_value: float | None
+    changed_at: datetime
+
+
+class HoldingPlan(BaseModel):
+    plan_date: date
+    actual_months: list[str]
+    forecast_months: list[str]  # the 3 used
+    skus: list[SkuResult]
+    settings_used: list[SupplierHolding]
+    blocked_suppliers: list[str]
+    counts: dict[str, int]  # TO_ORDER, NO_ORDER_NEEDED, HOLDING_NOT_SET, NO_DEMAND_DATA, ZERO_FORECAST
+
+
+class RunListItemV2(BaseModel):
+    id: int
+    created_at: datetime
+    file_name: str
+    sales_file_name: str
+    plan_date: date
+    sku_count: int
+
+
+class RunRecordV2(RunListItemV2):
+    parsed: ParsedInput
+    actual: ActualSales
+    result: HoldingPlan
