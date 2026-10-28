@@ -2,7 +2,7 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 V1_BACKUP_NAME = "orderplan.v1-backup"
 
 SCHEMA = """
@@ -27,13 +27,24 @@ CREATE TABLE IF NOT EXISTS runs (
     sku_count INTEGER NOT NULL,
     parsed_json TEXT NOT NULL,
     actual_json TEXT NOT NULL,
-    result_json TEXT NOT NULL
+    result_json TEXT NOT NULL,
+    pg_file_name TEXT NULL,
+    pdg_file_name TEXT NULL,
+    stock_json TEXT NULL
 );
 """
 
 
+# Added to `runs` in v3. A v2 database lacks them; each is added in place, so existing rows are kept.
+V3_RUN_COLUMNS = ("pg_file_name", "pdg_file_name", "stock_json")
+
+
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(runs)")}
+    for column in V3_RUN_COLUMNS:
+        if column not in existing:
+            conn.execute(f"ALTER TABLE runs ADD COLUMN {column} TEXT NULL")
     if conn.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 

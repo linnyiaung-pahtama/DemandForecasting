@@ -12,17 +12,20 @@ from app import config
 from app.holding import forecast_window, plan_all, plan_date_bounds, validate_plan_date
 from app.export import XLSX_MEDIA_TYPE, build_export
 from app.models import (ActualSales, InputFileError, InspectResponse, ParsedInput, RunListItem,
-                        RunRecord, SettingsLogEntry, SupplierHolding, SupplierSettingView,
-                        SupplierSummary)
+                        RunRecord, SettingsLogEntry, StockResult, SupplierHolding,
+                        SupplierSettingView, SupplierSummary)
 from app.parsing import parse_input
 from app.repository import Repository
 from app.sales import actual_cartons, parse_sales
+from app.stock import PDG_NAME, PG_NAME, apply_stock, parse_pdg, parse_pg, stock_date_warnings
 from app.summary import summarize_suppliers
 
 MIN_HOLDING, MAX_HOLDING = 0.5, 24
 
 
-def _parse_uploads(data_file: UploadFile, sales_file: UploadFile) -> tuple[ParsedInput, ActualSales]:
+def _parse_uploads(data_file: UploadFile, sales_file: UploadFile, pg_file: UploadFile,
+                   pdg_file: UploadFile) -> tuple[ParsedInput, ActualSales, StockResult]:
+    """Parse the four uploads in order; the first unusable file is reported under its own name."""
     try:
         parsed = parse_input(data_file.file.read())
     except InputFileError as exc:
@@ -31,7 +34,16 @@ def _parse_uploads(data_file: UploadFile, sales_file: UploadFile) -> tuple[Parse
         actual = actual_cartons(parse_sales(sales_file.file.read()), parsed)
     except InputFileError as exc:
         raise HTTPException(status_code=400, detail=f"Sales export: {exc}") from exc
-    return parsed, actual
+    try:
+        pg = parse_pg(pg_file.file.read())
+    except InputFileError as exc:
+        raise HTTPException(status_code=400, detail=f"{PG_NAME}: {exc}") from exc
+    try:
+        pdg = parse_pdg(pdg_file.file.read())
+    except InputFileError as exc:
+        raise HTTPException(status_code=400, detail=f"{PDG_NAME}: {exc}") from exc
+    parsed, stock = apply_stock(parsed, pg, pdg)
+    return parsed, actual, stock
 
 
 def _parse_plan_date(text: str | None) -> date | None:
@@ -79,30 +91,37 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         return {"status": "ok"}
 
     @app.post("/api/inspect", response_model=InspectResponse)
-    def inspect(data_file: UploadFile = File(...), sales_file: UploadFile = File(...)) -> InspectResponse:
-        parsed, actual = _parse_uploads(data_file, sales_file)
+    def inspect(data_file: UploadFile = File(...), sales_file: UploadFile = File(...),
+                pg_file: UploadFile = File(...), pdg_file: UploadFile = File(...)) -> InspectResponse:
+        parsed, actual, stock = _parse_uploads(data_file, sales_file, pg_file, pdg_file)
         min_date, max_date = plan_date_bounds(parsed)
         return InspectResponse(
             file_name=data_file.filename or "", sales_file_name=sales_file.filename or "",
+            pg_file_name=pg_file.filename or "", pdg_file_name=pdg_file.filename or "", stock=stock,
             sku_count=len(parsed.skus), supplier_count=len({s.supplier for s in parsed.skus}),
             forecast_months=parsed.forecast_months, actual_months=actual.months,
             forecast_window=forecast_window(parsed),
             skus_with_sales=actual.skus_with_sales, mtd_label=parsed.mtd_label,
             mtd_end=parsed.mtd_end, default_plan_date=parsed.default_plan_date,
             min_plan_date=min_date, max_plan_date=max_date,
-            warnings=parsed.warnings + actual.warnings)
+            warnings=(parsed.warnings + actual.warnings + stock.warnings
+                      + stock_date_warnings(stock, parsed.default_plan_date)))
 
     @app.post("/api/runs", response_model=RunRecord)
     def create_run(data_file: UploadFile = File(...), sales_file: UploadFile = File(...),
+                   pg_file: UploadFile = File(...), pdg_file: UploadFile = File(...),
                    plan_date: str | None = Form(None)) -> RunRecord:
-        parsed, actual = _parse_uploads(data_file, sales_file)
+        parsed, actual, stock = _parse_uploads(data_file, sales_file, pg_file, pdg_file)
         chosen = _parse_plan_date(plan_date) or parsed.default_plan_date
         try:
             validate_plan_date(parsed, chosen)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         result = plan_all(parsed, actual, repo.get_holdings(), chosen)
-        run_id = repo.create_run(data_file.filename or "", sales_file.filename or "", parsed, actual, result)
+        stock.warnings = stock.warnings + stock_date_warnings(stock, chosen)
+        run_id = repo.create_run(data_file.filename or "", sales_file.filename or "",
+                                 pg_file.filename or "", pdg_file.filename or "",
+                                 parsed, actual, stock, result)
         return get_run_or_404(run_id)
 
     @app.get("/api/runs", response_model=list[RunListItem])

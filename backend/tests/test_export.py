@@ -39,7 +39,8 @@ def load(content: bytes) -> openpyxl.Workbook:
 def test_export_v2_sheets_and_values(tmp_path):
     c = TestClient(create_app(tmp_path / "t.db"))
     assert c.put("/api/settings", json=[{"supplier": "CFC", "holding_months": 3}]).status_code == 200
-    run = c.post("/api/runs", files={"data_file": ("d.xlsx", DATA), "sales_file": ("s.xlsx", SALES)}).json()
+    run = c.post("/api/runs", files={"data_file": ("d.xlsx", DATA), "sales_file": ("s.xlsx", SALES),
+                                     "pg_file": ("pg.xlsx", DATA), "pdg_file": ("pdg.xlsx", DATA)}).json()
     r = c.get(f"/api/runs/{run['id']}/export")
     assert r.status_code == 200 and "order-plan-2026-10-12-run" in r.headers["content-disposition"]
     wb = load(r.content)
@@ -76,9 +77,10 @@ def test_export_v2_sheets_and_values(tmp_path):
     assert settings.max_row == 18
     warnings = wb["Warnings"]
     assert [cell.value for cell in warnings[1]] == ["Source", "SAP Code", "Column", "Message"]
-    # the real Data file carries 13 parse warnings (10 negative MTD, 3 zero shelf life); the sales export none
+    # the real Data file carries 14 warnings (the ignored stock columns, 10 negative MTD, 3 zero shelf life);
+    # the sales export none; the stock reports hold codes that are not in the Data sheet (one warning each)
     sources = [r[0] for r in warnings.iter_rows(min_row=2, values_only=True)]
-    assert sources == ["Data file"] * 13
+    assert sources == ["Data file"] * 14 + ["Stock files"] * 2
 
 
 def test_export_stock_columns_and_warnings():

@@ -12,6 +12,7 @@ from app.models import (
     RunListItem,
     RunRecord,
     SettingsLogEntry,
+    StockResult,
     SupplierHolding,
 )
 
@@ -78,20 +79,24 @@ class Repository:
             ).fetchall()
         return [_log_entry(r) for r in rows]
 
-    def create_run(self, file_name: str, sales_file_name: str, parsed: ParsedInput,
-                   actual: ActualSales, result: HoldingPlan) -> int:
+    def create_run(self, file_name: str, sales_file_name: str, pg_file_name: str, pdg_file_name: str,
+                   parsed: ParsedInput, actual: ActualSales, stock: StockResult, result: HoldingPlan) -> int:
         with self._conn() as conn:
             cur = conn.execute(
-                "INSERT INTO runs (created_at, file_name, sales_file_name, plan_date, sku_count,"
-                " parsed_json, actual_json, result_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO runs (created_at, file_name, sales_file_name, pg_file_name, pdg_file_name,"
+                " plan_date, sku_count, parsed_json, actual_json, stock_json, result_json)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     _now(),
                     file_name,
                     sales_file_name,
+                    pg_file_name,
+                    pdg_file_name,
                     result.plan_date.isoformat(),
                     len(result.skus),
                     parsed.model_dump_json(),
                     actual.model_dump_json(),
+                    stock.model_dump_json(),
                     result.model_dump_json(),
                 ),
             )
@@ -114,17 +119,21 @@ class Repository:
             created_at=row["created_at"],
             file_name=row["file_name"],
             sales_file_name=row["sales_file_name"],
+            pg_file_name=row["pg_file_name"],
+            pdg_file_name=row["pdg_file_name"],
             plan_date=row["plan_date"],
             sku_count=row["sku_count"],
             parsed=ParsedInput.model_validate_json(row["parsed_json"]),
             actual=ActualSales.model_validate_json(row["actual_json"]),
+            stock=StockResult.model_validate_json(row["stock_json"]) if row["stock_json"] else None,
             result=HoldingPlan.model_validate_json(row["result_json"]),
         )
 
     def list_runs(self) -> list[RunListItem]:
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT id, created_at, file_name, sales_file_name, plan_date, sku_count"
+                "SELECT id, created_at, file_name, sales_file_name, pg_file_name, pdg_file_name,"
+                " plan_date, sku_count"
                 " FROM runs ORDER BY id DESC"
             ).fetchall()
         return [RunListItem(**dict(r)) for r in rows]

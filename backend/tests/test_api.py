@@ -12,8 +12,10 @@ def client(tmp_path):
     return TestClient(create_app(tmp_path / "t.db"))
 
 
-def files(data=DATA, sales=SALES):
-    return {"data_file": ("data.xlsx", data), "sales_file": ("sales.xlsx", sales)}
+def files(data=DATA, sales=SALES, pg=DATA, pdg=DATA):
+    """The fixture workbook carries the Data sheet and both stock sheets, so it serves as PG and PDG too."""
+    return {"data_file": ("data.xlsx", data), "sales_file": ("sales.xlsx", sales),
+            "pg_file": ("pg.xlsx", pg), "pdg_file": ("pdg.xlsx", pdg)}
 
 
 def test_inspect_reports_months_and_coverage(client):
@@ -143,7 +145,51 @@ def test_window_coverage_warnings_reach_inspect_and_the_stored_run(client):
     sales = make_sales_workbook([["PG", "Yangon", "P", "B", "F1", "x", 2026, m, 40, 0] for m in ("Jul", "Aug", "Sep")])
     expected = ["No forecast column for Nov 2026 — counted as missing",
                 "No forecast column for Dec 2026 — counted as missing"]
+    # the Data headers hold the Total Sellable/Non-Sellable stock columns, which the parser now reports as ignored
+    ignored = "Stock columns in the Data sheet are ignored; stock comes from the PDG Stock List and PG Expiry Check files."
+    parsed_messages = [ignored, *expected]
     inspected = client.post("/api/inspect", files=files(data, sales)).json()
-    assert [w["message"] for w in inspected["warnings"] if w["sap_code"] is None] == expected
+    # Data-file warnings come first in the inspect list, ahead of the sales and stock ones
+    assert [w["message"] for w in inspected["warnings"][:len(parsed_messages)]] == parsed_messages
     run = client.post("/api/runs", files=files(data, sales)).json()
-    assert [w["message"] for w in run["parsed"]["warnings"] if w["sap_code"] is None] == expected
+    assert [w["message"] for w in run["parsed"]["warnings"] if w["sap_code"] is None] == parsed_messages
+
+
+def test_inspect_reports_stock(client):
+    r = client.post("/api/inspect", files=files()).json()
+    assert r["pg_file_name"] == "pg.xlsx" and r["pdg_file_name"] == "pdg.xlsx"
+    assert r["stock"]["skus_with_stock"] == 136
+    assert r["stock"]["pg"]["as_of"] == "2026-10-12" and r["stock"]["pdg"]["as_of"] == "2026-10-12"
+    assert any(w["message"].startswith("Stock columns in the Data sheet are ignored") for w in r["warnings"])
+
+
+def test_inspect_flags_stock_reports_far_from_the_default_plan_date(client):
+    from tests.helpers import DEFAULT_HEADERS, make_workbook
+    r = client.post("/api/inspect", files=files()).json()      # stock as of 12 Oct, default plan date 12 Oct
+    assert not any("the plan date" in w["message"] for w in r["warnings"])
+    headers = [h.replace("(1-11 Oct)", "(1-19 Oct)") for h in DEFAULT_HEADERS]
+    late = make_workbook([["F1", "Sup", "Noodles", 10, 0, 6, 7, 100, 0, 0, 5] + [50] * 12], headers=headers)
+    r = client.post("/api/inspect", files=files(data=late)).json()
+    assert r["default_plan_date"] == "2026-10-20"
+    msgs = [w["message"] for w in r["warnings"]]
+    assert "PDG Stock List was printed on 12 Oct 2026, 8 days before the plan date" in msgs
+    assert "PG Expiry Check is as of 12 Oct 2026, 8 days before the plan date" in msgs
+
+
+def test_swapped_stock_files_return_400(client):
+    from tests.helpers import make_pg_workbook
+    pg_only = make_pg_workbook([["3102111001", "W", "Sellable", 1, 1, 1, None, None]])
+    r = client.post("/api/inspect", files=files(pdg=pg_only))
+    assert r.status_code == 400 and r.json()["detail"].startswith("PDG Stock List: No sheet has StockCode")
+    r = client.post("/api/runs", files=files(pg=SALES))
+    assert r.status_code == 400 and r.json()["detail"].startswith("PG Expiry Check: No sheet has Item Code")
+
+
+def test_run_stores_stock_and_date_warning(client):
+    run = client.post("/api/runs", files=files(), data={"plan_date": "2026-10-20"}).json()
+    assert run["pg_file_name"] == "pg.xlsx" and run["stock"]["skus_with_stock"] == 136
+    msgs = [w["message"] for w in run["stock"]["warnings"]]
+    assert "PG Expiry Check is as of 12 Oct 2026, 8 days before the plan date" in msgs
+    rec = client.post(f"/api/runs/{run['id']}/recalculate").json()
+    assert rec["stock"] == run["stock"]
+    assert client.get("/api/runs").json()[0]["pdg_file_name"] == "pdg.xlsx"

@@ -93,6 +93,8 @@ class StockResult(BaseModel):
 class InspectResponse(BaseModel):
     file_name: str
     sales_file_name: str
+    pg_file_name: str
+    pdg_file_name: str
     sku_count: int
     supplier_count: int
     forecast_months: list[str]  # all forecast columns found in the Data file
@@ -104,7 +106,8 @@ class InspectResponse(BaseModel):
     default_plan_date: date
     min_plan_date: date
     max_plan_date: date
-    warnings: list[ParseWarning]  # Data file warnings, then sales export warnings
+    stock: StockResult
+    warnings: list[ParseWarning]  # Data file, sales export, stock report and merge, then stock date warnings
 
 
 class SkuStatus(str, Enum):
@@ -177,6 +180,8 @@ class RunListItem(BaseModel):
     created_at: datetime
     file_name: str
     sales_file_name: str
+    pg_file_name: str | None = None  # None for runs saved before the stock reports
+    pdg_file_name: str | None = None
     plan_date: date
     sku_count: int
 
