@@ -4,7 +4,7 @@ import { errorText, getRun, getSupplierSummary } from '../api'
 import { fmtDate, fmtMonths, fmtQty } from '../lib/format'
 import type { RunRecord, SkuResult, SupplierSummary } from '../types'
 
-const COLUMNS = 8
+const COLUMNS = 10
 
 // Keyed by run id so switching runs remounts the view: no stale run or expanded rows carry over.
 export default function SupplierPage() {
@@ -92,6 +92,8 @@ function SupplierView({ runId }: { runId: number }) {
               <tr>
                 <th>Supplier</th>
                 <th className="num">Holding (months)</th>
+                <th className="num">MOQ</th>
+                <th className="num">Lead time (days)</th>
                 <th className="num">SKUs</th>
                 <th className="num">SKUs to order</th>
                 <th className="num">Total order qty</th>
@@ -127,6 +129,8 @@ function SupplierView({ runId }: { runId: number }) {
                           fmtMonths(s.holding_months)
                         )}
                       </td>
+                      <td className="num">{s.moq === null ? '—' : fmtQty(s.moq)}</td>
+                      <td className="num">{s.lead_time_days ?? '—'}</td>
                       <td className="num">{s.sku_count}</td>
                       <td className="num">{s.skus_to_order}</td>
                       <td className="num">{fmtQty(s.total_order_qty)}</td>

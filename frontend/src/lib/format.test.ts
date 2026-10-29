@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { fmtDate, fmtQty, fmtTime, monthLabel, orderExplanation, statusLabel } from './format'
-import type { DemandValue, SkuResult } from '../types'
+import { fmtDate, fmtQty, fmtTime, isLegacyRun, monthLabel, orderExplanation, statusLabel } from './format'
+import type { DemandValue, HoldingPlan, SkuResult } from '../types'
 
 describe('monthLabel', () => {
   it('formats a YYYY-MM key', () => {
@@ -236,7 +236,7 @@ describe('orderExplanation', () => {
   it('handles a missing lead time', () => {
     const r: SkuResult = { ...worked, lead_time_days: null, next_calc_date: null }
     const lines = orderExplanation(r, '2026-10-14')
-    expect(lines[lines.length - 1]).toBe('Next calculation date: no lead time')
+    expect(lines[lines.length - 1]).toBe('Next calculation date: lead time not set')
   })
 })
 
@@ -248,5 +248,28 @@ describe('fmtTime', () => {
 
   it('returns an empty string when there is no time', () => {
     expect(fmtTime('2026-10-12')).toBe('')
+  })
+})
+
+describe('isLegacyRun', () => {
+  const plan = (moq: number | null): HoldingPlan => ({
+    plan_date: '2026-10-12',
+    actual_months: [],
+    forecast_months: [],
+    skus: [],
+    settings_used: [
+      { supplier: 'A', holding_months: 2, moq: 0, lead_time_days: 14 },
+      { supplier: 'B', holding_months: null, moq, lead_time_days: null },
+    ],
+    blocked_suppliers: [],
+    counts: {},
+  })
+
+  it('is true when a supplier in settings_used has no recorded MOQ (saved before supplier MOQ/lead time)', () => {
+    expect(isLegacyRun(plan(null))).toBe(true)
+  })
+
+  it('is false when every supplier has a recorded MOQ', () => {
+    expect(isLegacyRun(plan(0))).toBe(false)
   })
 })

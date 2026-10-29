@@ -38,11 +38,11 @@ export default function SkuDetail({ sku, planDate, warnings, onClose }: Props) {
         </div>
         <div>
           <dt>Lead time</dt>
-          <dd>{sku.lead_time_days === null ? '—' : `${sku.lead_time_days} days`}</dd>
+          <dd>{sku.lead_time_days === null ? 'not set' : `${sku.lead_time_days} days`}</dd>
         </div>
         <div>
           <dt>MOQ</dt>
-          <dd>{sku.moq > 0 ? fmtQty(sku.moq) : 'none'}</dd>
+          <dd>{sku.moq > 0 ? `${fmtQty(sku.moq)} (supplier)` : 'none'}</dd>
         </div>
         <div>
           <dt>Packing size</dt>

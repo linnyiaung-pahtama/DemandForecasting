@@ -6,7 +6,7 @@ import StatusChip from '../components/StatusChip'
 import WarningsPanel from '../components/WarningsPanel'
 import { filterSkus } from '../lib/filters'
 import type { SkuFilter } from '../lib/filters'
-import { fmtCover, fmtDate, fmtMonths, fmtQty, statusLabel } from '../lib/format'
+import { fmtCover, fmtDate, fmtMonths, fmtQty, isLegacyRun, statusLabel } from '../lib/format'
 import type { RunRecord, SkuStatus } from '../types'
 
 const STATUSES: SkuStatus[] = ['TO_ORDER', 'NO_ORDER_NEEDED', 'HOLDING_NOT_SET', 'NO_DEMAND_DATA']
@@ -131,6 +131,11 @@ function PlanView({ runId }: { runId: number }) {
             Plan date {fmtDate(result.plan_date)} · {run.file_name} + {run.sales_file_name}
             {run.pg_file_name !== null && run.pdg_file_name !== null && ` + ${run.pg_file_name} + ${run.pdg_file_name}`}
           </div>
+          {isLegacyRun(result) && (
+            <div className="muted">
+              Saved before MOQ and lead time moved to Supplier settings — Recalculate to use the current settings.
+            </div>
+          )}
         </div>
         <div className="plan-actions">
           <Link className="btn" to={`/runs/${runId}/suppliers`}>

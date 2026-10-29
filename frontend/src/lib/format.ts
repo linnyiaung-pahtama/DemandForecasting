@@ -1,4 +1,4 @@
-import type { SkuResult, SkuStatus } from '../types'
+import type { HoldingPlan, SkuResult, SkuStatus } from '../types'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
@@ -123,9 +123,14 @@ export function orderExplanation(r: SkuResult, planDate: string): string[] {
       `Next calculation date = ${fmtDate(planDate)} + ${plural(r.lead_time_days, 'day')} lead time = ${fmtDate(r.next_calc_date)}`,
     )
   } else if (r.lead_time_days === null) {
-    lines.push('Next calculation date: no lead time')
+    lines.push('Next calculation date: lead time not set')
   } else {
     lines.push(`Next calculation date: lead time of ${r.lead_time_days} days is not valid`)
   }
   return lines
+}
+
+/** A plan saved before MOQ and lead time moved to supplier settings: its settings record no MOQ. */
+export function isLegacyRun(plan: HoldingPlan): boolean {
+  return plan.settings_used.some((s) => s.moq === null)
 }
