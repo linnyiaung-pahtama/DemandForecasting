@@ -55,7 +55,7 @@ def test_export_v2_sheets_and_values(tmp_path):
         "Principal", "SAP Code", "Description", "Status", "Zero Forecast", "Sellable", "PG Sellable", "PDG Sellable",
         "SIT", "Available", "PG Non-Sellable", "PDG Non-Sellable",
         "Jul 2026 Actual", "Aug 2026 Actual", "Sep 2026 Actual",
-        "Oct 2026 Forecast", "Nov 2026 Forecast", "Dec 2026 Forecast",
+        "Oct 2026 Sales Forecast", "Nov 2026 Sales Forecast", "Dec 2026 Sales Forecast",
         "Valid Values", "Buffer", "Holding (months)", "Target", "Required", "MOQ", "MOQ Applied",
         "Order Qty", "Stock Cover (months)", "Lead Time (days)", "Next Calculation Date"]
     assert ws["A1"].font.bold and ws.freeze_panes == "A2"
@@ -152,7 +152,7 @@ def test_export_number_formats():
     row = next(r for r in ws.iter_rows(min_row=2) if r[1].value == "3102111001")
     fmt = {h: c.number_format for h, c in zip(header, row)}
     for name in ("Sellable", "SIT", "Available", "Jul 2026 Actual", "Aug 2026 Actual", "Sep 2026 Actual",
-                 "Oct 2026 Forecast", "Nov 2026 Forecast", "Dec 2026 Forecast", "Buffer", "Target"):
+                 "Oct 2026 Sales Forecast", "Nov 2026 Sales Forecast", "Dec 2026 Sales Forecast", "Buffer", "Target"):
         assert fmt[name] == "0.00", name
     assert fmt["Stock Cover (months)"] == "0.0"
     assert fmt["Next Calculation Date"] == "yyyy-mm-dd"
@@ -190,7 +190,7 @@ MONTH_HEADERS = ["Oct 2026", "Nov 2026", "Dec 2026", "Jan 2027", "Feb 2027", "Ma
 
 
 SALES_HEADERS = ["Jul 2026 Actual", "Aug 2026 Actual", "Sep 2026 Actual",
-                 "Oct 2026 Forecast", "Nov 2026 Forecast", "Dec 2026 Forecast"]
+                 "Oct 2026 Sales Forecast", "Nov 2026 Sales Forecast", "Dec 2026 Sales Forecast"]
 PLAN_SETTINGS_HEADERS = ["Principal", "SAP Code", "Description", "MOQ", "Holding (months)", "Lead Time (days)"]
 STOCK_HEADERS = ["Buffer", "Available", "Target"]
 

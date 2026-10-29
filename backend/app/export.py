@@ -56,7 +56,7 @@ def build_export(run: RunRecord) -> bytes:
     wb = Workbook()
 
     month_headers = ([f"{month_label(m)} Actual" for m in result.actual_months]
-                     + [f"{month_label(m)} Forecast" for m in result.forecast_months])
+                     + [f"{month_label(m)} Sales Forecast" for m in result.forecast_months])
 
     def demand_row(sku) -> list:
         by_month = {(d.source, d.month): d.value for d in sku.demand_values}

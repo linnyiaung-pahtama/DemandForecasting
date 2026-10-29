@@ -79,7 +79,7 @@ export default function SkuDetail({ sku, planDate, warnings, onClose }: Props) {
           {sku.demand_values.map((d) => (
             <tr key={`${d.source}-${d.month}`} className={d.valid ? undefined : 'muted'}>
               <td>{monthLabel(d.month)}</td>
-              <td>{d.source === 'actual' ? 'Actual' : 'Forecast'}</td>
+              <td>{d.source === 'actual' ? 'Actual' : 'Sales forecast'}</td>
               <td className="num">{d.value === null ? '—' : fmtExact(d.value)}</td>
               <td aria-label={d.valid ? 'Valid' : 'Skipped'}>{d.valid ? '✓' : '✗'}</td>
             </tr>
