@@ -80,11 +80,24 @@ def build_export(run: RunRecord) -> bytes:
                       "Required", "MOQ", "MOQ Applied", "Order Qty", "Stock Cover (months)",
                       "Lead Time (days)", "Next Calculation Date"], sku_rows, formats)
 
+    # 12-month plan: one column per plan month (none for runs saved before it); a blocked SKU's cells stay blank
+    plan_headers = [month_label(m) for m in result.plan_months]
+    twelve_rows = []
+    for sku in result.skus:
+        orders = [p.order for p in sku.monthly] if sku.monthly else [None] * len(plan_headers)
+        total = None if sku.monthly is None or sku.holding_months is None else sum(o or 0 for o in orders)
+        twelve_rows.append([sku.supplier, sku.sap_code, sku.description, sku.status.value, *orders, total])
+    _write_sheet(wb.create_sheet("12-Month Plan"),
+                 ["Supplier", "SAP Code", "Description", "Status", *plan_headers, "Total"], twelve_rows)
+
+    def monthly(s) -> list:
+        return s.monthly_order_qty if s.monthly_order_qty is not None else [None] * len(plan_headers)
+
     _write_sheet(wb.create_sheet("Supplier Summary"),
                  ["Supplier", "Holding (months)", "SKUs", "SKUs to Order", "Total Order Qty",
-                  "Blocked SKUs", "No Demand SKUs", "Zero Forecast SKUs"],
+                  "Blocked SKUs", "No Demand SKUs", "Zero Forecast SKUs", *plan_headers, "12-Month Total"],
                  [[s.supplier, s.holding_months, s.sku_count, s.skus_to_order, s.total_order_qty,
-                   s.blocked_skus, s.no_demand_skus, s.zero_forecast_skus]
+                   s.blocked_skus, s.no_demand_skus, s.zero_forecast_skus, *monthly(s), s.twelve_month_total]
                   for s in summarize_suppliers(result)])
 
     _write_sheet(wb.create_sheet("Settings Used"), ["Supplier", "Holding (months)", "MOQ", "Lead Time (days)"],

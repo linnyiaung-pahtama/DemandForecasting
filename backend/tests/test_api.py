@@ -241,3 +241,15 @@ def test_settings_missing_keys_returns_422(client):
     r = client.put("/api/settings", json=[{"supplier": "A", "holding_months": 3}])
     assert r.status_code == 422
     assert r.json()["detail"] == "Each setting needs a supplier name and holding_months, moq and lead_time_days values."
+
+
+def test_recalculate_refreshes_monthly_plan(client):
+    run = client.post("/api/runs", files=files()).json()
+    assert client.put("/api/settings", json=[row("CFC", 3, moq=500, lead=7)]).status_code == 200
+    rec = client.post(f"/api/runs/{run['id']}/recalculate").json()
+    orders = [m["order"] for m in next(s for s in rec["result"]["skus"] if s["sap_code"] == "3102111001")["monthly"]]
+    assert 500 in orders and 0 in orders and rec["result"]["plan_months"][0] == "2026-10"
+    assert client.put("/api/settings", json=[row("CFC", 3, moq=0, lead=7)]).status_code == 200
+    rec = client.post(f"/api/runs/{run['id']}/recalculate").json()
+    orders = [m["order"] for m in next(s for s in rec["result"]["skus"] if s["sap_code"] == "3102111001")["monthly"]]
+    assert 500 not in orders

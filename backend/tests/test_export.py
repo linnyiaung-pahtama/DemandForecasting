@@ -46,7 +46,7 @@ def test_export_v2_sheets_and_values(tmp_path):
     r = c.get(f"/api/runs/{run['id']}/export")
     assert r.status_code == 200 and "order-plan-2026-10-12-run" in r.headers["content-disposition"]
     wb = load(r.content)
-    assert wb.sheetnames == ["SKU Plan", "Supplier Summary", "Settings Used", "Warnings"]
+    assert wb.sheetnames == ["SKU Plan", "12-Month Plan", "Supplier Summary", "Settings Used", "Warnings"]
 
     ws = wb["SKU Plan"]
     assert ws.max_row == 213
@@ -72,7 +72,7 @@ def test_export_v2_sheets_and_values(tmp_path):
     summary = wb["Supplier Summary"]
     assert [cell.value for cell in summary[1]] == [
         "Supplier", "Holding (months)", "SKUs", "SKUs to Order", "Total Order Qty", "Blocked SKUs",
-        "No Demand SKUs", "Zero Forecast SKUs"]
+        "No Demand SKUs", "Zero Forecast SKUs", *MONTH_HEADERS, "12-Month Total"]
     assert summary.max_row == 18 and summary["A2"].value == "CFC"
     settings = wb["Settings Used"]
     assert [cell.value for cell in settings[1]] == ["Supplier", "Holding (months)", "MOQ", "Lead Time (days)"]
@@ -183,3 +183,34 @@ def test_settings_used_sheet_is_blank_for_old_runs():
     ws = load(build_export(run))["Settings Used"]
     assert [c.value for c in ws[1]] == ["Supplier", "Holding (months)", "MOQ", "Lead Time (days)"]
     assert next(r for r in ws.iter_rows(min_row=2, values_only=True) if r[0] == "CFC") == ("CFC", 3, None, None)
+
+
+MONTH_HEADERS = ["Oct 2026", "Nov 2026", "Dec 2026", "Jan 2027", "Feb 2027", "Mar 2027",
+                 "Apr 2027", "May 2027", "Jun 2027", "Jul 2027", "Aug 2027", "Sep 2027"]
+
+
+def test_twelve_month_sheet():
+    run = make_run(DATA, SALES, {"CFC": 3}, lead=7)
+    wb = load(build_export(run))
+    ws = wb["12-Month Plan"]
+    header = [c.value for c in ws[1]]
+    assert header == ["Supplier", "SAP Code", "Description", "Status", *MONTH_HEADERS, "Total"]
+    rows = {r[1]: r for r in ws.iter_rows(min_row=2, values_only=True)}
+    sku = next(s for s in run.result.skus if s.sap_code == "3102111001")
+    row = rows["3102111001"]
+    assert list(row[4:16]) == [p.order for p in sku.monthly] and row[16] == sum(p.order for p in sku.monthly)
+    blocked = next(s for s in run.result.skus if s.supplier != "CFC")
+    assert all(v is None for v in rows[blocked.sap_code][4:17])
+    summary = wb["Supplier Summary"]
+    sheader = [c.value for c in summary[1]]
+    assert sheader[-13:] == [*MONTH_HEADERS, "12-Month Total"]
+
+
+def test_twelve_month_sheet_for_old_runs():
+    run = make_run(DATA, SALES, {"CFC": 3})
+    for s in run.result.skus:
+        s.monthly = None
+    run.result.plan_months = []
+    wb = load(build_export(run))
+    assert [c.value for c in wb["12-Month Plan"][1]] == ["Supplier", "SAP Code", "Description", "Status", "Total"]
+    assert [c.value for c in wb["Supplier Summary"][1]][-1] == "12-Month Total"

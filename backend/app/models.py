@@ -221,6 +221,8 @@ class SupplierSummary(BaseModel):
     zero_forecast_skus: int
     moq: float | None  # from the plan's settings_used; None for runs saved before supplier MOQ/lead time
     lead_time_days: int | None
+    monthly_order_qty: list[int] | None = None  # per plan month; None for runs saved before the 12-month plan
+    twelve_month_total: int | None = None
 
 
 class SupplierSettingView(BaseModel):

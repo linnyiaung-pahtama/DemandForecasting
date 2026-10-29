@@ -49,3 +49,27 @@ def test_old_run_settings_used_loads():
         "counts": {"TO_ORDER": 0}})
     [s] = summarize_suppliers(plan)
     assert s.supplier == "CFC" and s.holding_months == 3 and s.moq is None and s.lead_time_days is None
+
+
+def test_supplier_monthly_totals():
+    parsed = _parsed_with_stock()
+    actual = actual_cartons(parse_sales((FIX / "sales_export.xlsx").read_bytes()), parsed)
+    result = plan_all(parsed, actual, holding_settings({"CFC": 3}, moq=0, lead=7), date(2026, 10, 12))
+    summary = {s.supplier: s for s in summarize_suppliers(result)}
+    cfc_skus = [s for s in result.skus if s.supplier == "CFC"]
+    expected = [sum(s.monthly[i].order or 0 for s in cfc_skus) for i in range(12)]
+    assert summary["CFC"].monthly_order_qty == expected and len(expected) == 12
+    assert summary["CFC"].twelve_month_total == sum(expected)
+    blocked = next(s for name, s in summary.items() if name != "CFC")
+    assert blocked.monthly_order_qty == [0] * 12 and blocked.twelve_month_total == 0
+
+
+def test_old_run_has_blank_monthly_totals():
+    parsed = _parsed_with_stock()
+    actual = actual_cartons(parse_sales((FIX / "sales_export.xlsx").read_bytes()), parsed)
+    result = plan_all(parsed, actual, holding_settings({"CFC": 3}), date(2026, 10, 12))
+    for s in result.skus:
+        s.monthly = None          # as a run saved before the 12-month plan
+    result.plan_months = []
+    cfc = next(s for s in summarize_suppliers(result) if s.supplier == "CFC")
+    assert cfc.monthly_order_qty is None and cfc.twelve_month_total is None
