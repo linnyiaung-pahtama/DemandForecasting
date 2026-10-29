@@ -2,7 +2,8 @@ from datetime import date
 
 import pytest
 
-from app.holding import plan_date_bounds, plan_sku, validate_plan_date
+from app.holding import plan_date_bounds, plan_sku, roll_forward, validate_plan_date
+from app.months import next_months
 from app.models import ActualSales, SkuInput, SkuStatus, SupplierSettings
 
 ACT = ["2026-07", "2026-08", "2026-09"]; FC = ["2026-10", "2026-11", "2026-12"]
@@ -219,3 +220,64 @@ def test_plan_all_uses_supplier_settings():
     assert all(r.moq == 150 and r.order_qty == 150 and r.moq_applied for r in result.skus)
     assert all(r.lead_time_days == 61 and r.next_calc_date == date(2026, 12, 14) for r in result.skus)
     assert result.settings_used == [settings["S"]] and result.blocked_suppliers == []
+
+
+# ---- 12-month roll-forward ----------------------------------------------------------------------
+
+MONTHS = next_months("2026-10", 12)
+
+
+def test_worked_example_rolls_forward():   # spec section 3 table, extended to 12 months
+    m = roll_forward(run(), MONTHS)
+    assert [p.month for p in m] == MONTHS
+    assert [p.order for p in m] == [150, 150, 150, 150, 0, 150, 150, 150, 150, 0, 150, 150]
+    assert [p.closing for p in m] == pytest.approx([290, 320, 350, 380, 260, 290, 320, 350, 380, 260, 290, 320])
+    assert m[0].opening == 260 and all(p.demand == pytest.approx(120) for p in m)
+    assert m[0].moq_applied and m[1].moq_applied and not m[4].moq_applied
+
+
+def test_moq_zero_orders_the_buffer_after_month_one():
+    m = roll_forward(run(moq=0), MONTHS)
+    assert [p.order for p in m] == [100] + [120] * 11
+    assert all(p.closing == pytest.approx(240) for p in m)
+
+
+def test_large_moq_orders_once_then_waits():
+    # buffer 49/month, holding 2 (target 98), available 0, MOQ 8000
+    r = run(actuals=(49, 49, 49), fc=(49, 49, 49), holding=2, moq=8000, sellable=0, sit=0)
+    orders = [p.order for p in roll_forward(r, MONTHS)]
+    assert orders[0] == 8000 and orders[1:] == [0] * 11
+
+
+def test_holding_not_set_has_no_orders():
+    m = roll_forward(run(holding=None), MONTHS)
+    assert all(p.order is None for p in m)
+    assert m[-1].closing == pytest.approx(260 - 12 * 120)   # stock runs down
+
+
+def test_no_demand_orders_zero_and_stock_stays():
+    m = roll_forward(run(actuals=(0, 0, 0), fc=(0, 0, 0)), MONTHS)
+    assert all(p.order == 0 and p.demand == 0 and p.closing == 260 for p in m)
+
+
+def test_negative_available_rolls_forward():
+    m = roll_forward(run(sellable=-20, sit=0, moq=0), MONTHS)   # target 360
+    assert m[0].order == 380 and m[0].closing == pytest.approx(240)
+    assert [p.order for p in m[1:]] == [120] * 11 and all(p.order >= 0 for p in m)
+
+
+def test_plan_all_attaches_twelve_months_matching_todays_order():
+    from pathlib import Path
+    from app.holding import plan_all
+    from app.parsing import parse_input
+    from app.sales import actual_cartons, parse_sales
+    from app.stock import apply_stock, parse_pdg, parse_pg
+    fix = Path(__file__).parent / "fixtures"
+    raw = (fix / "sample_input.xlsx").read_bytes()
+    parsed = apply_stock(parse_input(raw), parse_pg(raw), parse_pdg(raw))[0]
+    actual = actual_cartons(parse_sales((fix / "sales_export.xlsx").read_bytes()), parsed)
+    settings = {s.supplier: SupplierSettings(supplier=s.supplier, holding_months=2, moq=0, lead_time_days=7)
+                for s in parsed.skus}
+    result = plan_all(parsed, actual, settings, parsed.default_plan_date)
+    assert result.plan_months == MONTHS
+    assert all(len(s.monthly) == 12 and s.monthly[0].order == s.order_qty for s in result.skus)

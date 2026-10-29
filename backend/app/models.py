@@ -124,6 +124,15 @@ class DemandValue(BaseModel):
     valid: bool
 
 
+class MonthPlan(BaseModel):
+    month: str  # "YYYY-MM"
+    opening: float
+    demand: float
+    order: int | None  # None when holding is not set
+    moq_applied: bool = False
+    closing: float
+
+
 class SkuResult(BaseModel):
     sap_code: str
     supplier: str
@@ -150,6 +159,7 @@ class SkuResult(BaseModel):
     next_calc_date: date | None
     status: SkuStatus
     zero_forecast: bool
+    monthly: list[MonthPlan] | None = None  # the 12-month plan; None for runs saved before it
 
 
 class SupplierSettings(BaseModel):
@@ -175,6 +185,7 @@ class HoldingPlan(BaseModel):
     plan_date: date
     actual_months: list[str]
     forecast_months: list[str]  # the 3 used
+    plan_months: list[str] = []  # the 12 months of the 12-month plan; empty for runs saved before it
     skus: list[SkuResult]
     settings_used: list[SupplierSettings]
     blocked_suppliers: list[str]

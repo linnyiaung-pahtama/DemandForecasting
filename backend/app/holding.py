@@ -3,7 +3,7 @@ import calendar
 import math
 from datetime import date, timedelta
 
-from app.models import (ActualSales, DemandValue, HoldingPlan, ParsedInput, SkuInput, SkuResult,
+from app.models import (ActualSales, DemandValue, HoldingPlan, MonthPlan, ParsedInput, SkuInput, SkuResult,
                         SkuStatus, SupplierSettings)
 from app.months import next_months
 
@@ -72,6 +72,40 @@ def plan_sku(sku: SkuInput, actuals: dict[str, float], actual_months: list[str],
         next_calc_date=next_calc_date, status=status, zero_forecast=zero_forecast)
 
 
+PLAN_MONTHS = 12
+
+
+def monthly_demand(sku: SkuResult, months: list[str]) -> dict[str, float]:
+    """Demand per month for the 12-month plan. For now every month is the buffer (0 with no demand data);
+    this is the one place a monthly forecast from the database would plug in."""
+    return {m: sku.buffer or 0.0 for m in months}
+
+
+def roll_forward(sku: SkuResult, months: list[str]) -> list[MonthPlan]:
+    """Month 1 is the SKU's planned order; each later month tops stock back up to the target, raised to MOQ.
+    Orders are assumed to arrive within the month they are placed."""
+    demand = monthly_demand(sku, months)
+    plan: list[MonthPlan] = []
+    opening = sku.available
+    for i, month in enumerate(months):
+        moq_applied = False
+        if i == 0:
+            order, moq_applied = sku.order_qty, sku.moq_applied
+        elif sku.holding_months is None:
+            order = None
+        elif sku.valid_count == 0:
+            order = 0
+        else:
+            order = max(math.ceil((sku.target or 0.0) - opening - EPS), 0)
+            if 0 < order < sku.moq:
+                order, moq_applied = math.ceil(sku.moq - EPS), True
+        closing = opening + (order or 0) - demand[month]
+        plan.append(MonthPlan(month=month, opening=opening, demand=demand[month], order=order,
+                              moq_applied=moq_applied, closing=closing))
+        opening = closing
+    return plan
+
+
 def plan_date_bounds(parsed: ParsedInput) -> tuple[date, date]:
     """Earliest and latest allowed plan date.
 
@@ -119,6 +153,9 @@ def plan_all(parsed: ParsedInput, actual: ActualSales, settings: dict[str, Suppl
     skus = [plan_sku(sku, actual.cartons.get(sku.sap_code, {}), actual_months, forecast_months,
                      used[sku.supplier].holding_months, plan_date, moq=used[sku.supplier].moq,
                      lead_time_days=used[sku.supplier].lead_time_days) for sku in parsed.skus]
+    plan_months = next_months(parsed.mtd_month, PLAN_MONTHS)
+    for result in skus:
+        result.monthly = roll_forward(result, plan_months)
     counts = {status.value: 0 for status in SkuStatus}
     counts[ZERO_FORECAST_KEY] = 0
     for result in skus:
@@ -126,6 +163,7 @@ def plan_all(parsed: ParsedInput, actual: ActualSales, settings: dict[str, Suppl
         counts[ZERO_FORECAST_KEY] += result.zero_forecast
     return HoldingPlan(
         plan_date=plan_date, actual_months=actual_months, forecast_months=forecast_months,
+        plan_months=plan_months,
         skus=skus,
         settings_used=list(used.values()),
         blocked_suppliers=[s for s in suppliers if used[s].holding_months is None], counts=counts)
