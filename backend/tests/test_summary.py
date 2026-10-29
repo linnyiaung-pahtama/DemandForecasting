@@ -61,7 +61,8 @@ def test_supplier_monthly_totals():
     assert summary["CFC"].monthly_order_qty == expected and len(expected) == 12
     assert summary["CFC"].twelve_month_total == sum(expected)
     blocked = next(s for name, s in summary.items() if name != "CFC")
-    assert blocked.monthly_order_qty == [0] * 12 and blocked.twelve_month_total == 0
+    # holding not set: nothing was calculated, so no totals (shown as "—"), never 0
+    assert blocked.monthly_order_qty is None and blocked.twelve_month_total is None
 
 
 def test_old_run_has_blank_monthly_totals():

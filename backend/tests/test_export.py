@@ -204,6 +204,8 @@ def test_twelve_month_sheet():
     summary = wb["Supplier Summary"]
     sheader = [c.value for c in summary[1]]
     assert sheader[-13:] == [*MONTH_HEADERS, "12-Month Total"]
+    srows = {r[0]: r for r in summary.iter_rows(min_row=2, values_only=True)}
+    assert all(v is None for v in srows[blocked.supplier][-13:])   # blocked supplier: blank, not 0
 
 
 def test_twelve_month_sheet_for_old_runs():

@@ -190,7 +190,7 @@ function SupplierView({ runId }: { runId: number }) {
           <p className="muted">Expand a supplier to see the SKUs on its purchase order.</p>
 
           <h2 className="section-head">12-month orders</h2>
-          {summary.some((s) => s.monthly_order_qty === null) ? (
+          {run.result.plan_months.length === 0 ? (
             <p className="muted">Recalculate to see the 12-month plan.</p>
           ) : (
             <table>
@@ -209,9 +209,10 @@ function SupplierView({ runId }: { runId: number }) {
                 {summary.map((s) => (
                   <tr key={s.supplier}>
                     <td>{s.supplier}</td>
-                    {(s.monthly_order_qty ?? []).map((qty, i) => (
-                      <td key={run.result.plan_months[i]} className="num">
-                        {fmtQty(qty)}
+                    {/* null when the supplier's holding is not set: nothing was calculated, so "—" rather than 0 */}
+                    {run.result.plan_months.map((m, i) => (
+                      <td key={m} className="num">
+                        {s.monthly_order_qty === null ? '—' : fmtQty(s.monthly_order_qty[i])}
                       </td>
                     ))}
                     <td className="num">{s.twelve_month_total === null ? '—' : fmtQty(s.twelve_month_total)}</td>
