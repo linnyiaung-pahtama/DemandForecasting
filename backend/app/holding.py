@@ -14,6 +14,27 @@ def _is_valid(value: float | None) -> bool:
     return value is not None and value > 0
 
 
+def _required(level: float, stock: float, valid_count: int) -> int:
+    """Whole cartons to bring stock up to the level. No demand data: 0 whatever the stock (spec section 6),
+    even if it is negative."""
+    return max(math.ceil(level - stock - EPS), 0) if valid_count else 0
+
+
+def _raise_to_moq(required: int, moq: float) -> tuple[int, bool]:
+    """An order above 0 but below the MOQ is raised to the MOQ. Returns (order, MOQ applied)."""
+    if 0 < required < moq:
+        return math.ceil(moq - EPS), True
+    return required, False
+
+
+def _status(holding_months: float | None, valid_count: int, order: int | None) -> SkuStatus:
+    if holding_months is None:
+        return SkuStatus.HOLDING_NOT_SET
+    if valid_count == 0:
+        return SkuStatus.NO_DEMAND_DATA
+    return SkuStatus.TO_ORDER if order > 0 else SkuStatus.NO_ORDER_NEEDED
+
+
 def plan_sku(sku: SkuInput, actuals: dict[str, float], actual_months: list[str],
              forecast_months: list[str], holding_months: float | None,
              plan_date: date, moq: float = 0.0, lead_time_days: int | None = None) -> SkuResult:
@@ -36,22 +57,9 @@ def plan_sku(sku: SkuInput, actuals: dict[str, float], actual_months: list[str],
     moq_applied = False
     if holding_months is not None:
         target = (buffer or 0.0) * holding_months
-        # no demand data: target and order are 0 whatever the stock (spec section 6), even if
-        # available is negative
-        required = max(math.ceil(target - available - EPS), 0) if valid_count else 0
-        order_qty = required
-        if 0 < required < moq:
-            order_qty = math.ceil(moq - EPS)
-            moq_applied = True
-
-    if holding_months is None:
-        status = SkuStatus.HOLDING_NOT_SET
-    elif valid_count == 0:
-        status = SkuStatus.NO_DEMAND_DATA
-    elif order_qty > 0:
-        status = SkuStatus.TO_ORDER
-    else:
-        status = SkuStatus.NO_ORDER_NEEDED
+        required = _required(target, available, valid_count)
+        order_qty, moq_applied = _raise_to_moq(required, moq)
+    status = _status(holding_months, valid_count, order_qty)
 
     lead = lead_time_days
     next_calc_date = None
@@ -81,29 +89,48 @@ def monthly_demand(sku: SkuResult, months: list[str]) -> dict[str, float]:
     return {m: sku.buffer or 0.0 for m in months}
 
 
-def roll_forward(sku: SkuResult, months: list[str]) -> list[MonthPlan]:
-    """Month 1 is the SKU's planned order; each later month tops stock back up to the target, raised to MOQ.
-    Orders are assumed to arrive within the month they are placed."""
+def order_up_to(sku: SkuResult, cycle: int) -> float | None:
+    """The stock an order month tops up to: enough that no month until the next order starts below the
+    holding, i.e. buffer × (holding + cycle − 1). Cycle 1 gives the target. None when holding is not set."""
+    if sku.holding_months is None:
+        return None
+    return (sku.buffer or 0.0) * (sku.holding_months + cycle - 1)
+
+
+def roll_forward(sku: SkuResult, months: list[str], cycle: int = 1) -> list[MonthPlan]:
+    """Order every `cycle` months, starting with month 1, topping stock up to `order_up_to` (raised to MOQ);
+    order nothing in the months between. Cycle 1 is the order demand forecast: every month tops stock back
+    up to the target, and month 1 is the SKU's planned order. Orders arrive within the month they are placed."""
     demand = monthly_demand(sku, months)
+    level = order_up_to(sku, cycle)
     plan: list[MonthPlan] = []
     opening = sku.available
     for i, month in enumerate(months):
+        order_month = i % cycle == 0
         moq_applied = False
-        if i == 0:
-            order, moq_applied = sku.order_qty, sku.moq_applied
-        elif sku.holding_months is None:
+        if level is None:
             order = None
-        elif sku.valid_count == 0:
+        elif not order_month:
             order = 0
         else:
-            order = max(math.ceil((sku.target or 0.0) - opening - EPS), 0)
-            if 0 < order < sku.moq:
-                order, moq_applied = math.ceil(sku.moq - EPS), True
+            order, moq_applied = _raise_to_moq(_required(level, opening, sku.valid_count), sku.moq)
         closing = opening + (order or 0) - demand[month]
         plan.append(MonthPlan(month=month, opening=opening, demand=demand[month], order=order,
-                              moq_applied=moq_applied, closing=closing))
+                              moq_applied=moq_applied, closing=closing, order_month=order_month))
         opening = closing
     return plan
+
+
+def _attach_order_plan(result: SkuResult, months: list[str], cycle: int) -> None:
+    """The order plan and its this-month values, next to the forecast-mode ones."""
+    result.order_cycle_months = cycle
+    result.order_plan = roll_forward(result, months, cycle)
+    result.plan_order_up_to = order_up_to(result, cycle)
+    if result.plan_order_up_to is not None:
+        result.plan_required = _required(result.plan_order_up_to, result.available, result.valid_count)
+    result.plan_order_qty = result.order_plan[0].order
+    result.plan_moq_applied = result.order_plan[0].moq_applied
+    result.plan_status = _status(result.holding_months, result.valid_count, result.plan_order_qty)
 
 
 def plan_date_bounds(parsed: ParsedInput) -> tuple[date, date]:
@@ -157,14 +184,19 @@ def plan_all(parsed: ParsedInput, actual: ActualSales, settings: dict[str, Suppl
     plan_months = next_months(parsed.mtd_month, PLAN_MONTHS)
     for result in skus:
         result.monthly = roll_forward(result, plan_months)
-    counts = {status.value: 0 for status in SkuStatus}
-    counts[ZERO_FORECAST_KEY] = 0
-    for result in skus:
-        counts[result.status.value] += 1
-        counts[ZERO_FORECAST_KEY] += result.zero_forecast
+        _attach_order_plan(result, plan_months, used[result.supplier].order_cycle_months)
     return HoldingPlan(
         plan_date=plan_date, actual_months=actual_months, forecast_months=forecast_months,
         plan_months=plan_months,
         skus=skus,
         settings_used=list(used.values()),
-        blocked_suppliers=[s for s in suppliers if used[s].holding_months is None], counts=counts)
+        blocked_suppliers=[s for s in suppliers if used[s].holding_months is None],
+        counts=_counts(skus, [r.status for r in skus]), plan_counts=_counts(skus, [r.plan_status for r in skus]))
+
+
+def _counts(skus: list[SkuResult], statuses: list[SkuStatus]) -> dict[str, int]:
+    counts = {status.value: 0 for status in SkuStatus}
+    counts[ZERO_FORECAST_KEY] = sum(r.zero_forecast for r in skus)
+    for status in statuses:
+        counts[status.value] += 1
+    return counts

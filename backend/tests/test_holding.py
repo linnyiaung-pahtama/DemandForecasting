@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from app.holding import plan_date_bounds, plan_sku, roll_forward, validate_plan_date
+from app.holding import order_up_to, plan_date_bounds, plan_sku, roll_forward, validate_plan_date
 from app.months import next_months
 from app.models import ActualSales, SkuInput, SkuStatus, SupplierSettings
 
@@ -282,3 +282,97 @@ def test_plan_all_attaches_twelve_months_matching_todays_order():
     result = plan_all(parsed, actual, settings, parsed.default_plan_date)
     assert result.plan_months == MONTHS
     assert all(len(s.monthly) == 12 and s.monthly[0].order == s.order_qty for s in result.skus)
+
+
+# ---- order plan (order cycle) ----------------------------------------------------------------------
+
+def test_order_plan_small_example():          # spec section 3: buffer 120, holding 3, cycle 3 -> order-up-to 600
+    m = roll_forward(run(moq=0), MONTHS, cycle=3)
+    assert [p.order for p in m] == [340, 0, 0, 360, 0, 0, 360, 0, 0, 360, 0, 0]
+    assert [p.order_month for p in m] == [True, False, False] * 4
+    assert m[3].opening == pytest.approx(240) and m[0].closing == pytest.approx(480)
+
+
+def test_order_plan_cycle_one_is_the_forecast():
+    for kw in ({}, {"moq": 0}, {"holding": None}, {"actuals": (0, 0, 0), "fc": (0, 0, 0)},
+               {"sellable": -20, "sit": 0}, {"holding": 0.5, "moq": 0}):
+        r = run(**kw)
+        assert roll_forward(r, MONTHS, cycle=1) == roll_forward(r, MONTHS), kw
+        assert all(p.order_month for p in roll_forward(r, MONTHS))
+
+
+def test_order_plan_cycle_twelve_and_five():
+    twelve = roll_forward(run(moq=0), MONTHS, cycle=12)
+    assert [p.order_month for p in twelve] == [True] + [False] * 11
+    assert twelve[0].order == 120 * 14 - 260 and all(p.order == 0 for p in twelve[1:])
+    assert [i for i, p in enumerate(roll_forward(run(moq=0), MONTHS, cycle=5)) if p.order_month] == [0, 5, 10]
+
+
+def test_order_plan_moq_and_zero_order_month():
+    m = roll_forward(run(moq=500), MONTHS, cycle=3)
+    assert m[0].order == 500 and m[0].moq_applied and not m[1].moq_applied
+    big = roll_forward(run(sellable=1000, sit=0, moq=0), MONTHS, cycle=3)   # 1000 already above 600
+    assert big[0].order == 0 and big[0].order_month and not big[0].moq_applied
+
+
+def test_order_plan_holding_not_set_has_no_orders():
+    m = roll_forward(run(holding=None), MONTHS, cycle=3)
+    assert all(p.order is None for p in m)
+    assert m[-1].closing == pytest.approx(260 - 12 * 120)
+
+
+def test_order_plan_no_demand_orders_zero():
+    m = roll_forward(run(actuals=(0, 0, 0), fc=(0, 0, 0)), MONTHS, cycle=3)
+    assert all(p.order == 0 and p.closing == 260 for p in m)
+
+
+def test_order_up_to():
+    assert order_up_to(run(), 3) == pytest.approx(600) and order_up_to(run(), 1) == pytest.approx(360)
+    assert order_up_to(run(holding=None), 3) is None
+    assert order_up_to(run(actuals=(0, 0, 0), fc=(0, 0, 0)), 3) == 0
+
+
+def test_plan_status_can_differ_from_forecast_status():
+    # available 400 is above the target 360 (forecast: no order) but below the order-up-to 600 (order plan: 200)
+    settings = {"S": SupplierSettings(supplier="S", holding_months=3, moq=0, lead_time_days=None,
+                                      order_cycle_months=3)}
+    result = _plan([sku(supplier="S", sellable=400, sit=0)], settings)
+    r = result.skus[0]
+    assert r.status == SkuStatus.NO_ORDER_NEEDED and r.order_qty == 0
+    assert r.plan_status == SkuStatus.TO_ORDER and r.plan_order_qty == 200 and r.plan_required == 200
+    assert r.plan_order_up_to == pytest.approx(600) and not r.plan_moq_applied and r.order_cycle_months == 3
+    assert r.order_plan[0].order == 200 and r.monthly == roll_forward(r, MONTHS)
+    assert result.plan_counts["TO_ORDER"] == result.counts["TO_ORDER"] + 1
+    assert result.plan_counts["NO_ORDER_NEEDED"] == result.counts["NO_ORDER_NEEDED"] - 1
+
+
+def test_plan_moq_applied_and_blocked_plan_values():
+    settings = {"S": SupplierSettings(supplier="S", holding_months=3, moq=500, lead_time_days=None,
+                                      order_cycle_months=3),
+                "B": SupplierSettings(supplier="B", holding_months=None, moq=0, lead_time_days=None,
+                                      order_cycle_months=2)}
+    result = _plan([sku(supplier="S", code="A"), sku(supplier="B", code="Z")], settings)
+    a, z = result.skus
+    assert a.plan_required == 340 and a.plan_order_qty == 500 and a.plan_moq_applied
+    assert (z.plan_status, z.plan_order_qty, z.plan_required, z.plan_order_up_to) == (
+        SkuStatus.HOLDING_NOT_SET, None, None, None)
+    assert z.order_cycle_months == 2 and all(p.order is None for p in z.order_plan)
+
+
+def test_cycle_one_order_plan_equals_forecast_on_fixture():
+    from pathlib import Path
+    from app.holding import plan_all
+    from app.parsing import parse_input
+    from app.sales import actual_cartons, parse_sales
+    from app.stock import apply_stock, parse_pdg, parse_pg
+    fix = Path(__file__).parent / "fixtures"
+    raw = (fix / "sample_input.xlsx").read_bytes()
+    parsed = apply_stock(parse_input(raw), parse_pg(raw), parse_pdg(raw))[0]
+    actual = actual_cartons(parse_sales((fix / "sales_export.xlsx").read_bytes()), parsed)
+    settings = {s.supplier: SupplierSettings(supplier=s.supplier, holding_months=2, moq=8000, lead_time_days=7,
+                                             order_cycle_months=1) for s in parsed.skus}
+    result = plan_all(parsed, actual, settings, parsed.default_plan_date)
+    for s in result.skus:
+        assert s.order_plan == s.monthly and s.plan_status == s.status and s.plan_order_qty == s.order_qty
+        assert s.plan_required == s.required and s.plan_moq_applied == s.moq_applied
+    assert result.plan_counts == result.counts

@@ -131,6 +131,7 @@ class MonthPlan(BaseModel):
     order: int | None  # None when holding is not set
     moq_applied: bool = False
     closing: float
+    order_month: bool = True  # False only for order-plan months between orders
 
 
 class SkuResult(BaseModel):
@@ -160,6 +161,15 @@ class SkuResult(BaseModel):
     status: SkuStatus
     zero_forecast: bool
     monthly: list[MonthPlan] | None = None  # the 12-month plan; None for runs saved before it
+    # The order plan (ordering only every order_cycle_months) and its this-month values; the fields above
+    # are the order demand forecast's. All None / False for runs saved before the order cycle setting.
+    order_cycle_months: int | None = None
+    order_plan: list[MonthPlan] | None = None
+    plan_order_up_to: float | None = None
+    plan_required: int | None = None
+    plan_order_qty: int | None = None
+    plan_moq_applied: bool = False
+    plan_status: SkuStatus | None = None
 
 
 class SupplierSettings(BaseModel):
@@ -191,6 +201,7 @@ class HoldingPlan(BaseModel):
     settings_used: list[SupplierSettings]
     blocked_suppliers: list[str]
     counts: dict[str, int]  # TO_ORDER, NO_ORDER_NEEDED, HOLDING_NOT_SET, NO_DEMAND_DATA, ZERO_FORECAST
+    plan_counts: dict[str, int] | None = None  # the same keys by order-plan status; None for older runs
 
 
 class RunListItem(BaseModel):
