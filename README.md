@@ -168,6 +168,26 @@ Worked example (supplier settings: holding 3 months, MOQ 150, lead time 61 days;
 
 The SKU detail page writes out this arithmetic for every SKU, with the six values and which were valid.
 
+## 12-month plan
+
+Besides this cycle's order, each plan shows how much to order in each of the next 12 months: the MTD month and the 11 after it (Oct 2026 – Sep 2027 for the current file).
+
+- **Demand each month** is the SKU's buffer, the same every month. For now the 12-month plan uses the past 3 months' sales and the next 3 months' forecast only, so forecast months 4–12 in the Data sheet are not used. When forecasts come from a database later, only this one step changes.
+- **Month 1** is this cycle's order. Opening stock is available (sellable + SIT), and closing = opening + order − demand.
+- **Each later month** opens with last month's closing stock. Its order = (buffer × holding) − opening, never below 0, rounded up and raised to the supplier's MOQ. Its closing = opening + order − demand.
+- **Orders arrive within the month they are placed**; lead time does not move them.
+- **Holding not set:** the supplier's SKUs show "—" for every month, and their stock runs down. **No demand data:** every month is 0.
+
+With the worked example above (buffer 120, holding 3, available 260, MOQ 150) the 12 orders are 150, 150, 150, 150, 0, 150, 150, 150, 150, 0, 150, 150. The MOQ overshoot builds stock until a month needs nothing. With MOQ 0 they are 100, then 120 every month.
+
+**Where it shows:**
+- the **12 months** switch on the Order plan page (one column per month plus a total, with the same filters);
+- a 12-month table (opening, demand, order, closing) in the SKU detail;
+- a **12-month orders** table on the Supplier summary page;
+- a **12-Month Plan** sheet in the Excel export, with the monthly totals also on the Supplier Summary sheet.
+
+Plans saved before the 12-month plan existed show "Recalculate to see the 12-month plan" until they are recalculated. No database upgrade is needed.
+
 ## Statuses and flags
 
 | Status | Meaning |

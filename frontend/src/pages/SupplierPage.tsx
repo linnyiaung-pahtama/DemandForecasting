@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { errorText, getRun, getSupplierSummary } from '../api'
-import { fmtDate, fmtMonths, fmtQty } from '../lib/format'
+import { fmtDate, fmtMonths, fmtQty, monthLabel } from '../lib/format'
 import type { RunRecord, SkuResult, SupplierSummary } from '../types'
 
 const COLUMNS = 10
@@ -188,6 +188,38 @@ function SupplierView({ runId }: { runId: number }) {
             </tbody>
           </table>
           <p className="muted">Expand a supplier to see the SKUs on its purchase order.</p>
+
+          <h2 className="section-head">12-month orders</h2>
+          {summary.some((s) => s.monthly_order_qty === null) ? (
+            <p className="muted">Recalculate to see the 12-month plan.</p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Supplier</th>
+                  {run.result.plan_months.map((m) => (
+                    <th key={m} className="num">
+                      {monthLabel(m)}
+                    </th>
+                  ))}
+                  <th className="num">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.map((s) => (
+                  <tr key={s.supplier}>
+                    <td>{s.supplier}</td>
+                    {(s.monthly_order_qty ?? []).map((qty, i) => (
+                      <td key={run.result.plan_months[i]} className="num">
+                        {fmtQty(qty)}
+                      </td>
+                    ))}
+                    <td className="num">{s.twelve_month_total === null ? '—' : fmtQty(s.twelve_month_total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       )}
     </div>
