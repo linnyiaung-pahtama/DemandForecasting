@@ -52,8 +52,8 @@ Then open http://localhost:5173. The frontend forwards `/api` requests to the ba
 
 1. **New plan**: choose the four files (the Data file, the sales export, the PG Expiry Check and the PDG Stock List), check the detected months, the stock facts (SKUs with stock, sellable cartons from PG and from PDG, the PDG printed date and the PG as-of date), the plan date and any warnings, then click Calculate. Calculate is enabled once all four files inspect OK.
 2. **Order plan**: count cards (To order, Holding not set, No demand data, Zero forecast), a banner listing blocked suppliers, and filters for supplier, status, the Zero forecast flag and search. A warnings panel above the table shows file-level warnings (labelled Data file, Sales export or Stock files; the stock report's name is in the message text) in full and counts the per-SKU warnings in a collapsible list. The plan header lists the four file names. Click a SKU to see its six demand values, its stock (available = PG sellable + PDG sellable + SIT, with non-sellable PG / PDG shown for information) and the arithmetic behind its order. The supplier summary is reached from this page.
-3. **Supplier summary**: per supplier, the holding, SKU counts, total order cartons and blocked / no-demand SKUs. Expand a supplier for the list of SKUs to put on one purchase order.
-4. **Supplier settings**: one Holding (months) per supplier, plus the change log (the newest 200 entries, newest first). Saving recalculates the latest run.
+3. **Supplier summary**: per supplier, the holding, MOQ and lead time the plan used, SKU counts, total order cartons and blocked / no-demand SKUs. Expand a supplier for the list of SKUs to put on one purchase order.
+4. **Supplier settings**: Holding (months), MOQ (cartons) and Lead time (days) per supplier, plus the change log (the newest 200 entries, newest first, one line per changed setting). Saving recalculates the latest run.
 5. **History**: reopen a past run exactly as it was calculated. Each run lists its file names (runs saved before the stock uploads show "—" for the two stock files).
 6. **Export**: Excel download with four sheets: SKU Plan (with PG Sellable, PDG Sellable, PG Non-Sellable and PDG Non-Sellable columns next to Available), Supplier Summary, Settings Used and Warnings.
 
@@ -73,8 +73,6 @@ Columns it uses:
 | `By Principal` | Supplier |
 | `Description` | SKU name |
 | `Packing Size` | Pieces per carton; used to convert the sales export from pieces to cartons |
-| `MOQ` | Minimum order in cartons (0 = none) |
-| `Lead Time` | Days from order to arrival; sets the next calculation date only |
 | `Shelf Life month` | Required column, but not used in the calculation |
 | `SIT Ctns (pending order)` | Stock in transit / already ordered. Neither stock report has it, so it still comes from the Data sheet |
 | `Oct'26  MTD Sale (1-11 Oct)` | Sets the MTD month and the stock date (MTD end). The default plan date is the day after, and the plan date can be at most the end of that month. The MTD quantity itself is not used |
@@ -82,7 +80,9 @@ Columns it uses:
 
 **Stock columns are no longer needed.** `Sellable (PG)`, `Sellable (PDG)`, `Total Sellable (Ctns)`, `Non-Sellable (PG)`, `Non-Sellable (PDG)` and `Total Non-Sellable (Ctns)` are not required and are never read. If any of them is still in the sheet, one warning is shown ("Stock columns in the Data sheet are ignored; stock comes from the PDG Stock List and PG Expiry Check files.") so you know you can remove them. The Data sheet stays the master SKU list: only its SKUs are planned.
 
-A missing `Data` sheet or required column, forecast months with a gap, a forecast that starts after the MTD month, or no forecast column at all for the 3 months used (the MTD month and the next 2) rejects the file with a message. If only some of those 3 months have no column, the file is accepted with a warning per missing month ("No forecast column for Nov 2026 — counted as missing"). Per-row problems (non-numeric values, negative forecast, missing lead time, and the shelf life and month-to-date oddities that the calculation does not use) and unrecognised `IMS` headers are kept and shown as warnings; nothing is cleaned silently.
+**MOQ and Lead Time are supplier settings now.** The `MOQ` and `Lead Time` columns are not required and are never read. If either is still in the sheet, one warning is shown ("MOQ and Lead Time columns in the Data sheet are ignored; they come from Supplier settings.").
+
+A missing `Data` sheet or required column, forecast months with a gap, a forecast that starts after the MTD month, or no forecast column at all for the 3 months used (the MTD month and the next 2) rejects the file with a message. If only some of those 3 months have no column, the file is accepted with a warning per missing month ("No forecast column for Nov 2026 — counted as missing"). Per-row problems (non-numeric values, negative forecast, negative SIT, and the shelf life and month-to-date oddities that the calculation does not use) and unrecognised `IMS` headers are kept and shown as warnings; nothing is cleaned silently.
 
 ### Sales export
 
@@ -149,11 +149,11 @@ For each SKU:
 2. **Target stock** = buffer x holding (months).
 3. **Available stock** = Total Sellable (PG sellable + PDG sellable) + SIT.
 4. **Required** = target - available, never below 0, rounded up to whole cartons.
-5. **MOQ check**: if 0 < required < MOQ, the order is the MOQ (tagged "MOQ"). If required is 0, the order is 0 and is not raised to MOQ.
+5. **MOQ check**: if 0 < required < the supplier's MOQ, the order is the MOQ (tagged "MOQ"). The MOQ applies to each SKU of the supplier on its own, not to the supplier's total. If required is 0, the order is 0 and is not raised to MOQ. MOQ 0 means no minimum.
 6. **Stock cover** (months) = available / buffer. Not shown if there is no buffer or if available stock is negative.
-7. **Next calculation date** = plan date + lead time (days). Not shown, with a warning, if lead time is missing or negative.
+7. **Next calculation date** = plan date + the supplier's lead time (days). Not shown ("lead time not set") if the supplier has no lead time; this does not block the order.
 
-Worked example (holding 3 months, available stock 260, MOQ 150, plan date 14 Oct 2026, lead time 61 days):
+Worked example (supplier settings: holding 3 months, MOQ 150, lead time 61 days; available stock 260, plan date 14 Oct 2026):
 
 | Step | Working | Result |
 |---|---|---|
@@ -179,17 +179,18 @@ The SKU detail page writes out this arithmetic for every SKU, with the six value
 
 **Zero forecast** is a flag, not a status. It is raised when all 3 forecast months are 0 or invalid but at least one actual month is valid. The order is still calculated from the actuals, and the flag tells the planner to review the SKU before ordering. It shows in the table, on a count card, and as a filter option, whether or not the order is above 0.
 
-## Holding settings
+## Supplier settings
 
 - One **Holding (months)** per supplier (`By Principal`), on the Supplier settings page. The range is 0.5 to 24 months and decimals are allowed (for example 1.5).
 - A blank value means not set. There is no default: a supplier with no holding is blocked (status Holding not set) until you enter one.
-- Every change is recorded in the change log: supplier, old value, new value and time (newest first). There is no user name, because the tool is single-user.
-- Saving sends only the changed rows and recalculates the latest run. The Order plan page also has a Recalculate button.
-- Lead time and MOQ are not settings; they come from the Data file.
+- **MOQ (cartons)** per supplier: a whole number, 0 or more (default 0 = no minimum). Any SKU of the supplier whose order is above 0 but below the MOQ is raised to the MOQ; it is not a minimum on the supplier's total order. "8,000" with a thousands separator is accepted.
+- **Lead time (days)** per supplier: a whole number from 0 to 365, or blank. It only sets the next calculation date; a blank lead time shows "Lead time not set — no next calculation date" and does not block anything.
+- Every change is recorded in the change log, one line per changed setting: supplier, setting, old value, new value and time (newest first). There is no user name, because the tool is single-user.
+- Saving sends only the changed rows and recalculates the latest run. The Order plan page also has a Recalculate button. Recalculating any plan, including an older one, uses the current settings.
 
 ## Database
 
-SQLite file at `backend/data/orderplan.db` (created on first start; not committed to git). It holds supplier holdings, the change log and all runs. To use a different file, set the `ORDERPLAN_DB` environment variable before starting the backend:
+SQLite file at `backend/data/orderplan.db` (created on first start; not committed to git). It holds supplier settings, the change log and all runs. To use a different file, set the `ORDERPLAN_DB` environment variable before starting the backend:
 
 ```
 $env:ORDERPLAN_DB = "C:\path\to\other.db"      # PowerShell
@@ -201,6 +202,13 @@ The `$env:` setting applies only to the current PowerShell window. The `backend`
 **Upgrading from v1.** If the database file is a v1 one (it has reorder/target days), the tool renames it to `orderplan.v1-backup.db` in the same folder (`orderplan.v1-backup-1.db`, `-2` and so on if that name is taken) and creates a fresh v2 database. Nothing is deleted. v1 runs and settings are not carried over.
 
 **Upgrading from v2 (stock reports).** A v2 database is upgraded in place the first time the new backend starts: three columns (the two stock file names and the stock breakdown) are added to the runs table and the schema version moves to 3. Nothing is recreated or renamed, so your runs and holding settings stay. Older runs open and recalculate as before; they show "—" for the PG / PDG split and for the stock file names, and keep the total sellable stock as it was stored. Recalculating a run reuses the stock it stored and never reads files again. The upgrade is one-way, so if you want to keep a copy of the v2 file, copy `backend/data/orderplan.db` before restarting the backend.
+
+**Upgrading to v4 (supplier MOQ and lead time).** A v3 database is upgraded in place the first time the new backend starts:
+- `supplier_settings` gains MOQ (0 for every supplier) and lead time columns, the change log gains a setting column, and the schema version moves to 4.
+- In the same step, and only then, each supplier's lead time is filled in once from the latest saved run. A supplier whose SKUs all had the same Data-sheet lead time gets it, and each value is written to the change log (blank → n days). MOQ is not filled in.
+- The upgrade does not recalculate any saved run. Until you recalculate it (or save settings), an older plan stays exactly as it was and shows "Saved before MOQ and lead time moved to Supplier settings — Recalculate to use the current settings."
+
+To keep the v3 file, copy `backend/data/orderplan.db` to `orderplan.pre-v4-backup.db` before restarting the backend.
 
 ## Tests
 
