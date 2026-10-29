@@ -286,6 +286,12 @@ a.btn.primary {
   box-shadow: 0 0 0 2px var(--accent) inset;
 }
 
+.view-switch {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
 .filters {
   display: flex;
   flex-wrap: wrap;

@@ -95,6 +95,38 @@ export default function SkuDetail({ sku, planDate, warnings, onClose }: Props) {
         ))}
       </ol>
 
+      {sku.monthly !== null && (
+        <>
+          <h3>12-month plan</h3>
+          <p className="muted">Demand each month = buffer (average of the valid values above).</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Month</th>
+                <th className="num">Opening</th>
+                <th className="num">Demand</th>
+                <th className="num">Order</th>
+                <th className="num">Closing</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sku.monthly.map((m) => (
+                <tr key={m.month}>
+                  <td>{monthLabel(m.month)}</td>
+                  <td className="num">{fmtExact(m.opening)}</td>
+                  <td className="num">{fmtExact(m.demand)}</td>
+                  <td className="num">
+                    {m.order === null ? '—' : fmtQty(m.order)}
+                    {m.moq_applied && <span className="chip chip-grey tag">MOQ</span>}
+                  </td>
+                  <td className="num">{fmtExact(m.closing)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
       {warnings.length > 0 && (
         <>
           <h3>Warnings</h3>

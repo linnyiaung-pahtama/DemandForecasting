@@ -6,7 +6,7 @@ import StatusChip from '../components/StatusChip'
 import WarningsPanel from '../components/WarningsPanel'
 import { filterSkus } from '../lib/filters'
 import type { SkuFilter } from '../lib/filters'
-import { fmtCover, fmtDate, fmtMonths, fmtQty, isLegacyRun, statusLabel } from '../lib/format'
+import { fmtCover, fmtDate, fmtMonths, fmtQty, hasMonthly, isLegacyRun, monthLabel, monthlyTotal, statusLabel } from '../lib/format'
 import type { RunRecord, SkuStatus } from '../types'
 
 const STATUSES: SkuStatus[] = ['TO_ORDER', 'NO_ORDER_NEEDED', 'HOLDING_NOT_SET', 'NO_DEMAND_DATA']
@@ -35,6 +35,7 @@ function PlanView({ runId }: { runId: number }) {
   const [zeroForecastOnly, setZeroForecastOnly] = useState(false)
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
+  const [view, setView] = useState<'cycle' | 'months'>('cycle')
 
   // Id of the run currently shown; lets a slow recalculate response be ignored after navigation.
   const currentRunId = useRef(runId)
@@ -228,71 +229,134 @@ function PlanView({ runId }: { runId: number }) {
         {filtersActive && <button onClick={clearFilters}>Clear filters</button>}
       </div>
 
+      <div className="view-switch" role="group" aria-label="Plan view">
+        <button aria-pressed={view === 'cycle'} className={view === 'cycle' ? 'primary' : undefined} onClick={() => setView('cycle')}>
+          This cycle
+        </button>
+        <button aria-pressed={view === 'months'} className={view === 'months' ? 'primary' : undefined} onClick={() => setView('months')}>
+          12 months
+        </button>
+      </div>
+
       <div className={`plan-body${selectedSku ? ' with-detail' : ''}`}>
         <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Supplier</th>
-                <th>SAP Code</th>
-                <th>Description</th>
-                <th className="num">Available</th>
-                <th className="num">Buffer</th>
-                <th className="num">Valid</th>
-                <th className="num">Holding</th>
-                <th className="num">Target</th>
-                <th className="num">Order qty</th>
-                <th className="num">Stock cover</th>
-                <th>Next calc date</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((s) => (
-                <tr
-                  key={s.sap_code}
-                  className={`clickable${s.sap_code === selected ? ' selected' : ''}`}
-                  onClick={() => setSelected(s.sap_code === selected ? null : s.sap_code)}
-                >
-                  <td>{s.supplier}</td>
-                  <td>{s.sap_code}</td>
-                  <td>{s.description}</td>
-                  <td className="num">{fmtQty(s.available)}</td>
-                  <td className="num">{s.buffer === null ? '—' : fmtQty(s.buffer)}</td>
-                  <td className="num">
-                    {s.valid_count}/{s.demand_values.length}
-                  </td>
-                  <td className="num">{s.holding_months === null ? '—' : fmtMonths(s.holding_months)}</td>
-                  <td className="num">{s.target === null ? '—' : fmtQty(s.target)}</td>
-                  <td className="num">
-                    {s.order_qty === null ? '—' : fmtQty(s.order_qty)}
-                    {s.moq_applied && <span className="chip chip-grey tag">MOQ</span>}
-                  </td>
-                  <td className="num">{s.stock_cover_months === null ? '—' : `${fmtCover(s.stock_cover_months)} mo`}</td>
-                  <td>{s.next_calc_date === null ? '—' : fmtDate(s.next_calc_date)}</td>
-                  <td>
-                    <StatusChip status={s.status} zeroForecast={s.zero_forecast} />
-                  </td>
-                </tr>
-              ))}
-              {rows.length === 0 && (
+          {view === 'months' ? (
+            hasMonthly(result) ? (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Supplier</th>
+                    <th>SAP Code</th>
+                    <th>Description</th>
+                    {result.plan_months.map((m) => (
+                      <th key={m} className="num">
+                        {monthLabel(m)}
+                      </th>
+                    ))}
+                    <th className="num">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((s) => {
+                    const total = monthlyTotal(s)
+                    return (
+                      <tr
+                        key={s.sap_code}
+                        className={`clickable${s.sap_code === selected ? ' selected' : ''}`}
+                        onClick={() => setSelected(s.sap_code === selected ? null : s.sap_code)}
+                      >
+                        <td>{s.supplier}</td>
+                        <td>{s.sap_code}</td>
+                        <td>{s.description}</td>
+                        {(s.monthly ?? []).map((m) => (
+                          <td key={m.month} className="num">
+                            {m.order === null ? '—' : fmtQty(m.order)}
+                            {m.moq_applied && <span className="chip chip-grey tag">MOQ</span>}
+                          </td>
+                        ))}
+                        <td className="num">{total === null ? '—' : fmtQty(total)}</td>
+                      </tr>
+                    )
+                  })}
+                  {rows.length === 0 && (
+                    <tr>
+                      <td colSpan={result.plan_months.length + 4} className="muted">
+                        No SKUs match the current filters.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            ) : (
+              <p className="muted">Recalculate to see the 12-month plan.</p>
+            )
+          ) : (
+            <>
+            <table>
+              <thead>
                 <tr>
-                  <td colSpan={12} className="muted">
-                    No SKUs match the current filters.{' '}
-                    {filtersActive && (
-                      <button className="link-button" onClick={clearFilters}>
-                        Clear filters
-                      </button>
-                    )}
-                  </td>
+                  <th>Supplier</th>
+                  <th>SAP Code</th>
+                  <th>Description</th>
+                  <th className="num">Available</th>
+                  <th className="num">Buffer</th>
+                  <th className="num">Valid</th>
+                  <th className="num">Holding</th>
+                  <th className="num">Target</th>
+                  <th className="num">Order qty</th>
+                  <th className="num">Stock cover</th>
+                  <th>Next calc date</th>
+                  <th>Status</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
-          <p className="muted">
-            Buffer is the average of the valid monthly values; order qty brings stock (sellable plus SIT) up to
-            buffer × holding. Click a row to see the arithmetic.
-          </p>
+              </thead>
+              <tbody>
+                {rows.map((s) => (
+                  <tr
+                    key={s.sap_code}
+                    className={`clickable${s.sap_code === selected ? ' selected' : ''}`}
+                    onClick={() => setSelected(s.sap_code === selected ? null : s.sap_code)}
+                  >
+                    <td>{s.supplier}</td>
+                    <td>{s.sap_code}</td>
+                    <td>{s.description}</td>
+                    <td className="num">{fmtQty(s.available)}</td>
+                    <td className="num">{s.buffer === null ? '—' : fmtQty(s.buffer)}</td>
+                    <td className="num">
+                      {s.valid_count}/{s.demand_values.length}
+                    </td>
+                    <td className="num">{s.holding_months === null ? '—' : fmtMonths(s.holding_months)}</td>
+                    <td className="num">{s.target === null ? '—' : fmtQty(s.target)}</td>
+                    <td className="num">
+                      {s.order_qty === null ? '—' : fmtQty(s.order_qty)}
+                      {s.moq_applied && <span className="chip chip-grey tag">MOQ</span>}
+                    </td>
+                    <td className="num">{s.stock_cover_months === null ? '—' : `${fmtCover(s.stock_cover_months)} mo`}</td>
+                    <td>{s.next_calc_date === null ? '—' : fmtDate(s.next_calc_date)}</td>
+                    <td>
+                      <StatusChip status={s.status} zeroForecast={s.zero_forecast} />
+                    </td>
+                  </tr>
+                ))}
+                {rows.length === 0 && (
+                  <tr>
+                    <td colSpan={12} className="muted">
+                      No SKUs match the current filters.{' '}
+                      {filtersActive && (
+                        <button className="link-button" onClick={clearFilters}>
+                          Clear filters
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+            <p className="muted">
+              Buffer is the average of the valid monthly values; order qty brings stock (sellable plus SIT) up to
+              buffer × holding. Click a row to see the arithmetic.
+            </p>
+            </>
+          )}
         </div>
         {selectedSku && (
           <SkuDetail

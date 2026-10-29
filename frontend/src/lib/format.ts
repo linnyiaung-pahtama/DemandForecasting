@@ -134,3 +134,14 @@ export function orderExplanation(r: SkuResult, planDate: string): string[] {
 export function isLegacyRun(plan: HoldingPlan): boolean {
   return plan.settings_used.some((s) => s.moq === null)
 }
+
+/** The plan carries a 12-month plan for every SKU (false for plans saved before it existed). */
+export function hasMonthly(plan: HoldingPlan): boolean {
+  return plan.plan_months.length > 0 && plan.skus.every((s) => s.monthly !== null)
+}
+
+/** A SKU's total cartons over the 12 months; null when its holding is not set or it has no 12-month plan. */
+export function monthlyTotal(r: SkuResult): number | null {
+  if (r.monthly === null || r.holding_months === null) return null
+  return r.monthly.reduce((sum, m) => sum + (m.order ?? 0), 0)
+}

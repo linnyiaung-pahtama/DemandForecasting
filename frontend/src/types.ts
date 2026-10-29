@@ -89,6 +89,15 @@ export interface DemandValue {
   valid: boolean
 }
 
+export interface MonthPlan {
+  month: string // "YYYY-MM"
+  opening: number
+  demand: number
+  order: number | null // null when holding is not set
+  moq_applied: boolean
+  closing: number
+}
+
 export interface SkuResult {
   sap_code: string
   supplier: string
@@ -115,6 +124,7 @@ export interface SkuResult {
   next_calc_date: string | null
   status: SkuStatus
   zero_forecast: boolean
+  monthly: MonthPlan[] | null // the 12-month plan; null for runs saved before it
 }
 
 export interface SupplierSettings {
@@ -139,6 +149,7 @@ export interface HoldingPlan {
   plan_date: string
   actual_months: string[]
   forecast_months: string[] // the 3 used
+  plan_months: string[] // the 12 months of the 12-month plan; empty for runs saved before it
   skus: SkuResult[]
   settings_used: SupplierSettings[]
   blocked_suppliers: string[]
@@ -174,6 +185,8 @@ export interface SupplierSummary {
   zero_forecast_skus: number
   moq: number | null // from the plan's settings; null for runs saved before supplier MOQ/lead time
   lead_time_days: number | null
+  monthly_order_qty: number[] | null // per plan month; null for runs saved before the 12-month plan
+  twelve_month_total: number | null
 }
 
 export interface SupplierSettingView {

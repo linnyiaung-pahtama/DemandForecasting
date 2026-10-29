@@ -1,6 +1,16 @@
 import { describe, it, expect } from 'vitest'
-import { fmtDate, fmtQty, fmtTime, isLegacyRun, monthLabel, orderExplanation, statusLabel } from './format'
-import type { DemandValue, HoldingPlan, SkuResult } from '../types'
+import {
+  fmtDate,
+  fmtQty,
+  fmtTime,
+  hasMonthly,
+  isLegacyRun,
+  monthLabel,
+  monthlyTotal,
+  orderExplanation,
+  statusLabel,
+} from './format'
+import type { DemandValue, HoldingPlan, MonthPlan, SkuResult } from '../types'
 
 describe('monthLabel', () => {
   it('formats a YYYY-MM key', () => {
@@ -74,6 +84,7 @@ const worked: SkuResult = {
   next_calc_date: '2026-12-14',
   status: 'TO_ORDER',
   zero_forecast: false,
+  monthly: null,
 }
 
 describe('orderExplanation', () => {
@@ -256,6 +267,7 @@ describe('isLegacyRun', () => {
     plan_date: '2026-10-12',
     actual_months: [],
     forecast_months: [],
+    plan_months: [],
     skus: [],
     settings_used: [
       { supplier: 'A', holding_months: 2, moq: 0, lead_time_days: 14 },
@@ -271,5 +283,49 @@ describe('isLegacyRun', () => {
 
   it('is false when every supplier has a recorded MOQ', () => {
     expect(isLegacyRun(plan(0))).toBe(false)
+  })
+})
+
+const month = (key: string, order: number | null): MonthPlan => ({
+  month: key,
+  opening: 0,
+  demand: 0,
+  order,
+  moq_applied: false,
+  closing: 0,
+})
+
+describe('monthlyTotal', () => {
+  it('sums the monthly orders', () => {
+    const r = { ...worked, monthly: [month('2026-10', 150), month('2026-11', 0), month('2026-12', 150)] }
+    expect(monthlyTotal(r)).toBe(300)
+  })
+
+  it('is null when holding is not set or there is no 12-month plan', () => {
+    expect(monthlyTotal({ ...worked, holding_months: null, monthly: [month('2026-10', null)] })).toBeNull()
+    expect(monthlyTotal({ ...worked, monthly: null })).toBeNull()
+  })
+})
+
+describe('hasMonthly', () => {
+  const plan = (skus: SkuResult[], planMonths: string[]): HoldingPlan => ({
+    plan_date: '2026-10-12',
+    actual_months: [],
+    forecast_months: [],
+    plan_months: planMonths,
+    skus,
+    settings_used: [],
+    blocked_suppliers: [],
+    counts: {},
+  })
+  const withMonths = { ...worked, monthly: [month('2026-10', 150)] }
+
+  it('is true when the plan has months and every SKU carries them', () => {
+    expect(hasMonthly(plan([withMonths, withMonths], ['2026-10']))).toBe(true)
+  })
+
+  it('is false for a plan saved before the 12-month plan', () => {
+    expect(hasMonthly(plan([withMonths], []))).toBe(false)
+    expect(hasMonthly(plan([withMonths, { ...worked, monthly: null }], ['2026-10']))).toBe(false)
   })
 })
