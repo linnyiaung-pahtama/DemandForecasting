@@ -4,6 +4,12 @@
     { "name": "backend", "runtimeExecutable": "backend/.venv/Scripts/python.exe",
       "runtimeArgs": ["-m", "uvicorn", "app.main:create_app", "--factory", "--app-dir", "backend", "--port", "8000"], "port": 8000 },
     { "name": "frontend", "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "frontend", "run", "dev"], "port": 5173 }
+      "runtimeArgs": ["--prefix", "frontend", "run", "dev"], "port": 5173 },
+    { "name": "backend-test", "runtimeExecutable": "backend/.venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "uvicorn", "app.main:create_app", "--factory", "--app-dir", "backend", "--port", "8001"], "port": 8001,
+      "env": { "ORDERPLAN_DB": "C:/Users/LINNYI~1/AppData/Local/Temp/claude/C--projects-DemandForecasting/567fe660-08d5-44b9-b8ab-6188dde8b9d2/scratchpad/v3-check.db" } },
+    { "name": "frontend-test", "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "frontend", "run", "dev", "--", "--port", "5174"], "port": 5174,
+      "env": { "ORDERPLAN_API": "http://127.0.0.1:8001" } }
   ]
 }
