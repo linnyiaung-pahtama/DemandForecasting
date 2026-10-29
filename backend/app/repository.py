@@ -38,31 +38,34 @@ class Repository:
     def get_settings(self) -> dict[str, SupplierSettings]:
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT supplier, holding_months, moq, lead_time_days FROM supplier_settings"
+                "SELECT supplier, holding_months, moq, lead_time_days, order_cycle_months FROM supplier_settings"
             ).fetchall()
         return {r["supplier"]: _settings(r) for r in rows}
 
     def save_settings(self, items: list[SupplierSettings]) -> list[SettingsLogEntry]:
         """Upsert settings and log each field whose value changed. A supplier with no stored row
-        counts as holding None, MOQ 0, lead time None."""
+        counts as holding None, MOQ 0, lead time None, order cycle 1."""
         now = _now()
         with self._conn() as conn:
             stored = {r["supplier"]: _settings(r) for r in conn.execute(
-                "SELECT supplier, holding_months, moq, lead_time_days FROM supplier_settings")}
+                "SELECT supplier, holding_months, moq, lead_time_days, order_cycle_months FROM supplier_settings")}
             log_ids: list[int] = []
             for item in items:
                 old = stored.get(item.supplier, SupplierSettings(supplier=item.supplier, holding_months=None,
-                                                                 moq=0, lead_time_days=None))
+                                                                 moq=0, lead_time_days=None, order_cycle_months=1))
                 changed = [f for f in SETTING_FIELDS if getattr(old, f) != getattr(item, f)]
                 if not changed:
                     continue
                 conn.execute(
-                    "INSERT INTO supplier_settings (supplier, holding_months, moq, lead_time_days, updated_at)"
-                    " VALUES (?, ?, ?, ?, ?)"
+                    "INSERT INTO supplier_settings"
+                    " (supplier, holding_months, moq, lead_time_days, order_cycle_months, updated_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?)"
                     " ON CONFLICT(supplier) DO UPDATE SET"
                     " holding_months = excluded.holding_months, moq = excluded.moq,"
-                    " lead_time_days = excluded.lead_time_days, updated_at = excluded.updated_at",
-                    (item.supplier, item.holding_months, item.moq, item.lead_time_days, now),
+                    " lead_time_days = excluded.lead_time_days, order_cycle_months = excluded.order_cycle_months,"
+                    " updated_at = excluded.updated_at",
+                    (item.supplier, item.holding_months, item.moq, item.lead_time_days, item.order_cycle_months,
+                     now),
                 )
                 for field in changed:
                     cur = conn.execute(
@@ -148,12 +151,13 @@ class Repository:
         return row["m"]
 
 
-SETTING_FIELDS = ("holding_months", "moq", "lead_time_days")
+SETTING_FIELDS = ("holding_months", "moq", "lead_time_days", "order_cycle_months")
 
 
 def _settings(row: sqlite3.Row) -> SupplierSettings:
     return SupplierSettings(supplier=row["supplier"], holding_months=row["holding_months"],
-                            moq=row["moq"], lead_time_days=row["lead_time_days"])
+                            moq=row["moq"], lead_time_days=row["lead_time_days"],
+                            order_cycle_months=row["order_cycle_months"])
 
 
 def _log_entry(row: sqlite3.Row) -> SettingsLogEntry:

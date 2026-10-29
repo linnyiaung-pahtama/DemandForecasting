@@ -149,7 +149,8 @@ def plan_all(parsed: ParsedInput, actual: ActualSales, settings: dict[str, Suppl
         stored = settings.get(s)
         used[s] = SupplierSettings(
             supplier=s, holding_months=stored.holding_months if stored else None,
-            moq=(stored.moq or 0.0) if stored else 0.0, lead_time_days=stored.lead_time_days if stored else None)
+            moq=(stored.moq or 0.0) if stored else 0.0, lead_time_days=stored.lead_time_days if stored else None,
+            order_cycle_months=(stored.order_cycle_months or 1) if stored else 1)
     skus = [plan_sku(sku, actual.cartons.get(sku.sap_code, {}), actual_months, forecast_months,
                      used[sku.supplier].holding_months, plan_date, moq=used[sku.supplier].moq,
                      lead_time_days=used[sku.supplier].lead_time_days) for sku in parsed.skus]

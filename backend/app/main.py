@@ -22,6 +22,7 @@ from app.summary import summarize_suppliers
 
 MIN_HOLDING, MAX_HOLDING = 0.5, 24
 MAX_LEAD_TIME_DAYS = 365
+MIN_ORDER_CYCLE, MAX_ORDER_CYCLE = 1, 12
 
 
 def _parse_uploads(data_file: UploadFile, sales_file: UploadFile, pg_file: UploadFile,
@@ -69,11 +70,13 @@ def _parse_settings(items: list[Any]) -> list[SupplierSettings]:
     settings: list[SupplierSettings] = []
     for raw in items:
         if (not isinstance(raw, dict) or not isinstance(raw.get("supplier"), str)
-                or any(key not in raw for key in ("holding_months", "moq", "lead_time_days"))):
+                or any(key not in raw for key in ("holding_months", "moq", "lead_time_days", "order_cycle_months"))):
             raise HTTPException(
                 status_code=422,
-                detail="Each setting needs a supplier name and holding_months, moq and lead_time_days values.")
+                detail="Each setting needs a supplier name and holding_months, moq, lead_time_days "
+                       "and order_cycle_months values.")
         name, holding, moq, lead = raw["supplier"], raw["holding_months"], raw["moq"], raw["lead_time_days"]
+        cycle = raw["order_cycle_months"]
         if holding is not None and not (_is_number(holding) and MIN_HOLDING <= holding <= MAX_HOLDING):
             raise HTTPException(
                 status_code=422,
@@ -87,8 +90,14 @@ def _parse_settings(items: list[Any]) -> list[SupplierSettings]:
                 status_code=422,
                 detail=f"Principal '{name}': lead time must be a whole number of days from 0 to "
                        f"{MAX_LEAD_TIME_DAYS}, or blank.")
+        if not (_is_whole(cycle) and MIN_ORDER_CYCLE <= cycle <= MAX_ORDER_CYCLE):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Principal '{name}': order cycle must be a whole number of months from "
+                       f"{MIN_ORDER_CYCLE} to {MAX_ORDER_CYCLE}.")
         settings.append(SupplierSettings(supplier=name, holding_months=holding, moq=float(moq),
-                                         lead_time_days=None if lead is None else int(lead)))
+                                         lead_time_days=None if lead is None else int(lead),
+                                         order_cycle_months=int(cycle)))
     return settings
 
 
@@ -172,7 +181,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
 
     def settings_views() -> list[SupplierSettingView]:
         """Every supplier in the latest run or the stored settings; one with no stored row shows
-        holding not set, MOQ 0 and no lead time."""
+        holding not set, MOQ 0, no lead time and order cycle 1."""
         stored = repo.get_settings()
         counts: dict[str, int] = {}
         latest = repo.latest_run_id()
@@ -184,7 +193,8 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             s = stored.get(name)
             views.append(SupplierSettingView(
                 supplier=name, holding_months=s.holding_months if s else None, moq=s.moq if s else 0,
-                lead_time_days=s.lead_time_days if s else None, sku_count=counts.get(name, 0)))
+                lead_time_days=s.lead_time_days if s else None,
+                order_cycle_months=(s.order_cycle_months or 1) if s else 1, sku_count=counts.get(name, 0)))
         return views
 
     @app.get("/api/settings", response_model=list[SupplierSettingView])

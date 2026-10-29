@@ -73,8 +73,21 @@ def _build_run():
     return parsed, actual, result
 
 
-def S(supplier, holding, moq=0, lead=None):
-    return SupplierSettings(supplier=supplier, holding_months=holding, moq=moq, lead_time_days=lead)
+def S(supplier, holding, moq=0, lead=None, cycle=1):
+    return SupplierSettings(supplier=supplier, holding_months=holding, moq=moq, lead_time_days=lead,
+                            order_cycle_months=cycle)
+
+
+def test_order_cycle_saved_and_logged(tmp_path):
+    repo = Repository(tmp_path / "t.db")
+    repo.save_settings([S("A", 2, cycle=3)])
+    assert repo.get_settings()["A"].order_cycle_months == 3
+    log = repo.get_settings_log()
+    assert {(e.field, e.old_value, e.new_value) for e in log} == {("holding_months", None, 2),
+                                                                  ("order_cycle_months", 1, 3)}
+    assert repo.save_settings([S("A", 2, cycle=3)]) == []
+    second = repo.save_settings([S("A", 2, cycle=1)])
+    assert [(e.field, e.old_value, e.new_value) for e in second] == [("order_cycle_months", 3, 1)]
 
 
 def test_holdings_and_log(tmp_path):
@@ -209,7 +222,7 @@ def test_v2_database_is_migrated_in_place(tmp_path):
     # the v4 step pre-fills from the latest run, whose supplier "A" had lead time 7 in its Data sheet
     assert set(settings) == {"CFC", "A"} and settings["A"].holding_months is None
     with closing(sqlite3.connect(db)) as c:
-        assert c.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert c.execute("PRAGMA user_version").fetchone()[0] == 5
         columns = [r[1] for r in c.execute("PRAGMA table_info(runs)")]
         assert columns[-3:] == ["pg_file_name", "pdg_file_name", "stock_json"]
         before = c.execute("SELECT * FROM runs").fetchall()
@@ -263,7 +276,7 @@ def test_v3_database_is_upgraded_to_v4_with_lead_times_prefilled(tmp_path):
         ("A", "lead_time_days", None, 14), ("C", "lead_time_days", None, 21)]
     assert len(log) == 3 and log[-1].field == "holding_months"
     with closing(sqlite3.connect(db)) as c:
-        assert c.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert c.execute("PRAGMA user_version").fetchone()[0] == 5
         assert c.execute("SELECT * FROM runs").fetchall() == runs_before
         settings_before = c.execute("SELECT * FROM supplier_settings ORDER BY supplier").fetchall()
 
@@ -271,3 +284,28 @@ def test_v3_database_is_upgraded_to_v4_with_lead_times_prefilled(tmp_path):
     assert len(repo.get_settings_log()) == 3
     with closing(sqlite3.connect(db)) as c:
         assert c.execute("SELECT * FROM supplier_settings ORDER BY supplier").fetchall() == settings_before
+
+
+def test_v4_database_upgrades_to_v5(tmp_path):
+    db = tmp_path / "v4.db"
+    with closing(sqlite3.connect(db)) as c:
+        c.executescript(V3_SCHEMA)
+        c.execute("ALTER TABLE supplier_settings ADD COLUMN moq REAL NOT NULL DEFAULT 0")
+        c.execute("ALTER TABLE supplier_settings ADD COLUMN lead_time_days INTEGER NULL")
+        c.execute("ALTER TABLE settings_log ADD COLUMN field TEXT NOT NULL DEFAULT 'holding_months'")
+        c.execute("INSERT INTO supplier_settings (supplier, holding_months, updated_at, moq, lead_time_days)"
+                  " VALUES ('A', 2.0, '2026-10-01T00:00:00', 8000, 14)")
+        c.execute("INSERT INTO settings_log (supplier, old_value, new_value, changed_at)"
+                  " VALUES ('A', NULL, 2.0, '2026-10-01T00:00:00')")
+        c.execute("PRAGMA user_version = 4")
+        c.commit()
+    repo = Repository(db)
+    assert repo.get_settings() == {"A": S("A", 2.0, 8000, 14, cycle=1)}
+    assert len(repo.get_settings_log()) == 1   # the default writes no log lines
+    with closing(sqlite3.connect(db)) as c:
+        assert c.execute("PRAGMA user_version").fetchone()[0] == 5
+        before = c.execute("SELECT * FROM supplier_settings").fetchall()
+    Repository(db)  # a second open changes nothing
+    assert len(repo.get_settings_log()) == 1
+    with closing(sqlite3.connect(db)) as c:
+        assert c.execute("SELECT * FROM supplier_settings").fetchall() == before

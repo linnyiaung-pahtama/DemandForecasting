@@ -12,9 +12,10 @@ def client(tmp_path):
     return TestClient(create_app(tmp_path / "t.db"))
 
 
-def row(supplier, holding, moq=0, lead=None):
+def row(supplier, holding, moq=0, lead=None, cycle=1):
     """One PUT /api/settings item; every key is required."""
-    return {"supplier": supplier, "holding_months": holding, "moq": moq, "lead_time_days": lead}
+    return {"supplier": supplier, "holding_months": holding, "moq": moq, "lead_time_days": lead,
+            "order_cycle_months": cycle}
 
 
 def files(data=DATA, sales=SALES, pg=DATA, pdg=DATA):
@@ -240,7 +241,31 @@ def test_settings_validation_moq_and_lead(client):
 def test_settings_missing_keys_returns_422(client):
     r = client.put("/api/settings", json=[{"supplier": "A", "holding_months": 3}])
     assert r.status_code == 422
-    assert r.json()["detail"] == "Each setting needs a supplier name and holding_months, moq and lead_time_days values."
+    assert r.json()["detail"] == ("Each setting needs a supplier name and holding_months, moq, lead_time_days "
+                                  "and order_cycle_months values.")
+    old_client_body = {"supplier": "A", "holding_months": 3, "moq": 0, "lead_time_days": None}
+    assert client.put("/api/settings", json=[old_client_body]).status_code == 422
+
+
+CYCLE_ERROR = "Principal 'Acme': order cycle must be a whole number of months from 1 to 12."
+
+
+@pytest.mark.parametrize("bad", [0, 13, 1.5, "3", None, True, -1])
+def test_order_cycle_validation(client, bad):
+    r = client.put("/api/settings", json=[row("Acme", 2, cycle=bad)])
+    assert r.status_code == 422 and r.json()["detail"] == CYCLE_ERROR
+
+
+def test_order_cycle_default_and_round_trip(client):
+    client.post("/api/runs", files=files())
+    assert all(v["order_cycle_months"] == 1 for v in client.get("/api/settings").json())
+    assert client.put("/api/settings", json=[row("CFC", 3, cycle=12.0)]).status_code == 200
+    s = {x["supplier"]: x for x in client.get("/api/settings").json()}
+    assert s["CFC"]["order_cycle_months"] == 12
+    assert all(x["order_cycle_months"] == 1 for name, x in s.items() if name != "CFC")
+    log = client.get("/api/settings/log").json()
+    assert ("CFC", "order_cycle_months", 1, 12) in [(e["supplier"], e["field"], e["old_value"], e["new_value"])
+                                                    for e in log]
 
 
 def test_recalculate_refreshes_monthly_plan(client):

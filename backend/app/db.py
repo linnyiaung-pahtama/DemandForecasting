@@ -4,7 +4,7 @@ from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 V1_BACKUP_NAME = "orderplan.v1-backup"
 
 SCHEMA = """
@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS supplier_settings (
     holding_months REAL NULL,
     updated_at TEXT NOT NULL,
     moq REAL NOT NULL DEFAULT 0,
-    lead_time_days INTEGER NULL
+    lead_time_days INTEGER NULL,
+    order_cycle_months INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS settings_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,6 +53,10 @@ V4_COLUMNS = (
 )
 
 
+# Added in v5: how often each principal is ordered from, in months (1 = every month).
+V5_COLUMNS = (("supplier_settings", "order_cycle_months", "INTEGER NOT NULL DEFAULT 1"),)
+
+
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
     return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
 
@@ -63,6 +68,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         if column not in existing:
             conn.execute(f"ALTER TABLE runs ADD COLUMN {column} TEXT NULL")
     _upgrade_to_v4(conn)
+    _upgrade_to_v5(conn)
     if conn.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
@@ -79,6 +85,22 @@ def _upgrade_to_v4(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
         if any(column == "lead_time_days" for _, column, _ in missing):
             _prefill_lead_times(conn)
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def _upgrade_to_v5(conn: sqlite3.Connection) -> None:
+    """Add the order cycle column in place, in one transaction. Every principal starts at 1 (order every
+    month), which changes no plan, so nothing is written to the change log."""
+    missing = [(t, c, d) for t, c, d in V5_COLUMNS if c not in _columns(conn, t)]
+    if not missing:
+        return
+    conn.execute("BEGIN")
+    try:
+        for table, column, definition in missing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
         conn.execute("COMMIT")
     except BaseException:
         conn.execute("ROLLBACK")

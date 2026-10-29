@@ -39,7 +39,7 @@ def load(content: bytes) -> openpyxl.Workbook:
 
 def test_export_v2_sheets_and_values(tmp_path):
     c = TestClient(create_app(tmp_path / "t.db"))
-    item = {"supplier": "CFC", "holding_months": 3, "moq": 0, "lead_time_days": 7}
+    item = {"supplier": "CFC", "holding_months": 3, "moq": 0, "lead_time_days": 7, "order_cycle_months": 1}
     assert c.put("/api/settings", json=[item]).status_code == 200
     run = c.post("/api/runs", files={"data_file": ("d.xlsx", DATA), "sales_file": ("s.xlsx", SALES),
                                      "pg_file": ("pg.xlsx", DATA), "pdg_file": ("pdg.xlsx", DATA)}).json()

@@ -167,9 +167,10 @@ class SupplierSettings(BaseModel):
     holding_months: float | None
     moq: float | None = None  # None only in runs saved before MOQ moved to supplier settings
     lead_time_days: int | None = None
+    order_cycle_months: int | None = None  # None only in runs saved before the order cycle setting
 
 
-SettingField = Literal["holding_months", "moq", "lead_time_days"]
+SettingField = Literal["holding_months", "moq", "lead_time_days", "order_cycle_months"]
 
 
 class SettingsLogEntry(BaseModel):
@@ -230,4 +231,5 @@ class SupplierSettingView(BaseModel):
     holding_months: float | None
     moq: float
     lead_time_days: int | None
+    order_cycle_months: int
     sku_count: int

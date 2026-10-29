@@ -210,12 +210,13 @@ def test_plan_all_supplier_without_settings():
     r = result.skus[0]
     assert r.status == SkuStatus.HOLDING_NOT_SET and r.next_calc_date is None and r.moq == 0
     assert result.settings_used == [SupplierSettings(supplier="New Co", holding_months=None, moq=0,
-                                                     lead_time_days=None)]
+                                                     lead_time_days=None, order_cycle_months=1)]
     assert result.blocked_suppliers == ["New Co"]
 
 
 def test_plan_all_uses_supplier_settings():
-    settings = {"S": SupplierSettings(supplier="S", holding_months=3, moq=150, lead_time_days=61)}
+    settings = {"S": SupplierSettings(supplier="S", holding_months=3, moq=150, lead_time_days=61,
+                                      order_cycle_months=1)}
     result = _plan([sku(supplier="S", code="A"), sku(supplier="S", code="B")], settings)
     assert all(r.moq == 150 and r.order_qty == 150 and r.moq_applied for r in result.skus)
     assert all(r.lead_time_days == 61 and r.next_calc_date == date(2026, 12, 14) for r in result.skus)
