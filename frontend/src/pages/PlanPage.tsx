@@ -6,7 +6,17 @@ import StatusChip from '../components/StatusChip'
 import WarningsPanel from '../components/WarningsPanel'
 import { filterSkus } from '../lib/filters'
 import type { SkuFilter } from '../lib/filters'
-import { fmtCover, fmtDate, fmtMonths, fmtQty, hasMonthly, isLegacyRun, monthLabel, monthlyTotal, statusLabel } from '../lib/format'
+import {
+  demandColumns,
+  fmtDate,
+  fmtMonths,
+  fmtQty,
+  hasMonthly,
+  isLegacyRun,
+  monthLabel,
+  monthlyTotal,
+  statusLabel,
+} from '../lib/format'
 import type { RunRecord, SkuStatus } from '../types'
 
 const STATUSES: SkuStatus[] = ['TO_ORDER', 'NO_ORDER_NEEDED', 'HOLDING_NOT_SET', 'NO_DEMAND_DATA']
@@ -35,7 +45,6 @@ function PlanView({ runId }: { runId: number }) {
   const [zeroForecastOnly, setZeroForecastOnly] = useState(false)
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
-  const [view, setView] = useState<'cycle' | 'months'>('cycle')
 
   // Id of the run currently shown; lets a slow recalculate response be ignored after navigation.
   const currentRunId = useRef(runId)
@@ -122,6 +131,9 @@ function PlanView({ runId }: { runId: number }) {
   }
 
   const blocked = result.blocked_suppliers.length
+  // product 3 + settings 3 + sales months + stock 3 + order months + total + status
+  const columnCount =
+    3 + 3 + result.actual_months.length + result.forecast_months.length + 3 + result.plan_months.length + 2
 
   return (
     <div className="plan">
@@ -230,31 +242,44 @@ function PlanView({ runId }: { runId: number }) {
         {filtersActive && <button onClick={clearFilters}>Clear filters</button>}
       </div>
 
-      <div className="view-switch" role="group" aria-label="Plan view">
-        <button aria-pressed={view === 'cycle'} className={view === 'cycle' ? 'primary' : undefined} onClick={() => setView('cycle')}>
-          This cycle
-        </button>
-        <button aria-pressed={view === 'months'} className={view === 'months' ? 'primary' : undefined} onClick={() => setView('months')}>
-          12 months
-        </button>
-      </div>
-
       <div className={`plan-body${selectedSku ? ' with-detail' : ''}`}>
         <div className="table-wrap">
-          {view === 'months' ? (
-            hasMonthly(result) ? (
+          {hasMonthly(result) ? (
+            <>
               <table className="plan-table">
                 <thead>
                   <tr>
-                    <th>Principal</th>
-                    <th>SAP Code</th>
-                    <th>Description</th>
-                    {result.plan_months.map((m) => (
-                      <th key={m} className="num">
+                    <th rowSpan={2} className="stick stick-1">Principal</th>
+                    <th rowSpan={2} className="stick stick-2">SAP Code</th>
+                    <th rowSpan={2} className="stick stick-3">Description</th>
+                    <th colSpan={3} className="group group-start">Principal settings</th>
+                    <th colSpan={result.actual_months.length} className="group group-start">Actual sales</th>
+                    <th colSpan={result.forecast_months.length} className="group group-start">Forecast</th>
+                    <th colSpan={3} className="group group-start">Stock</th>
+                    <th colSpan={result.plan_months.length} className="group group-start">Orders by month</th>
+                    <th rowSpan={2} className="num group-start">Total</th>
+                    <th rowSpan={2}>Status</th>
+                  </tr>
+                  <tr>
+                    <th className="num group-start">MOQ</th>
+                    <th className="num">Holding</th>
+                    <th className="num">Lead time</th>
+                    {[...result.actual_months, ...result.forecast_months].map((m, i) => (
+                      <th
+                        key={`${i < result.actual_months.length ? 'a' : 'f'}-${m}`}
+                        className={`num${i === 0 || i === result.actual_months.length ? ' group-start' : ''}`}
+                      >
                         {monthLabel(m)}
                       </th>
                     ))}
-                    <th className="num">Total</th>
+                    <th className="num group-start">Buffer</th>
+                    <th className="num">Available</th>
+                    <th className="num">Target</th>
+                    {result.plan_months.map((m, i) => (
+                      <th key={m} className={`num${i === 0 ? ' group-start' : ''}`}>
+                        {monthLabel(m)}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -266,91 +291,55 @@ function PlanView({ runId }: { runId: number }) {
                         className={`clickable${s.sap_code === selected ? ' selected' : ''}`}
                         onClick={() => setSelected(s.sap_code === selected ? null : s.sap_code)}
                       >
-                        <td>{s.supplier}</td>
-                        <td>{s.sap_code}</td>
-                        <td>{s.description}</td>
-                        {(s.monthly ?? []).map((m) => (
-                          <OrderCell key={m.month} qty={m.order} moqApplied={m.moq_applied} />
+                        <td className="stick stick-1">{s.supplier}</td>
+                        <td className="stick stick-2">{s.sap_code}</td>
+                        <td className="stick stick-3">{s.description}</td>
+                        <td className="num group-start">{fmtQty(s.moq)}</td>
+                        <td className="num">{s.holding_months === null ? '—' : `${fmtMonths(s.holding_months)} mo`}</td>
+                        <td className="num">{s.lead_time_days === null ? '—' : `${s.lead_time_days} days`}</td>
+                        {demandColumns(s, result.actual_months, result.forecast_months).map((d, i) => (
+                          <td
+                            key={i}
+                            className={`num${i === 0 || i === result.actual_months.length ? ' group-start' : ''}${d?.valid ? '' : ' skipped'}`}
+                            title={d?.valid ? undefined : 'Not counted in the buffer (zero, negative or missing)'}
+                          >
+                            {d === null || d.value === null ? '—' : fmtQty(d.value)}
+                          </td>
                         ))}
-                        <td className="num">{total === null ? '—' : fmtQty(total)}</td>
+                        <td className="num group-start">{s.buffer === null ? '—' : fmtQty(s.buffer)}</td>
+                        <td className="num">{fmtQty(s.available)}</td>
+                        <td className="num">{s.target === null ? '—' : fmtQty(s.target)}</td>
+                        {(s.monthly ?? []).map((m, i) => (
+                          <OrderCell key={m.month} qty={m.order} moqApplied={m.moq_applied} groupStart={i === 0} />
+                        ))}
+                        <td className="num group-start">{total === null ? '—' : fmtQty(total)}</td>
+                        <td>
+                          <StatusChip status={s.status} zeroForecast={s.zero_forecast} />
+                        </td>
                       </tr>
                     )
                   })}
                   {rows.length === 0 && (
                     <tr>
-                      <td colSpan={result.plan_months.length + 4} className="muted">
-                        No SKUs match the current filters.
+                      <td colSpan={columnCount} className="muted">
+                        No SKUs match the current filters.{' '}
+                        {filtersActive && (
+                          <button className="link-button" onClick={clearFilters}>
+                            Clear filters
+                          </button>
+                        )}
                       </td>
                     </tr>
                   )}
                 </tbody>
               </table>
-            ) : (
-              <p className="muted">Recalculate to see the 12-month plan.</p>
-            )
-          ) : (
-            <>
-            <table className="plan-table">
-              <thead>
-                <tr>
-                  <th>Principal</th>
-                  <th>SAP Code</th>
-                  <th>Description</th>
-                  <th className="num">Available</th>
-                  <th className="num">Buffer</th>
-                  <th className="num">Valid</th>
-                  <th className="num">Holding</th>
-                  <th className="num">Target</th>
-                  <th className="num">Order qty</th>
-                  <th className="num">Stock cover</th>
-                  <th>Next calc date</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((s) => (
-                  <tr
-                    key={s.sap_code}
-                    className={`clickable${s.sap_code === selected ? ' selected' : ''}`}
-                    onClick={() => setSelected(s.sap_code === selected ? null : s.sap_code)}
-                  >
-                    <td>{s.supplier}</td>
-                    <td>{s.sap_code}</td>
-                    <td>{s.description}</td>
-                    <td className="num">{fmtQty(s.available)}</td>
-                    <td className="num">{s.buffer === null ? '—' : fmtQty(s.buffer)}</td>
-                    <td className="num">
-                      {s.valid_count}/{s.demand_values.length}
-                    </td>
-                    <td className="num">{s.holding_months === null ? '—' : fmtMonths(s.holding_months)}</td>
-                    <td className="num">{s.target === null ? '—' : fmtQty(s.target)}</td>
-                    <OrderCell qty={s.order_qty} moqApplied={s.moq_applied} />
-                    <td className="num">{s.stock_cover_months === null ? '—' : `${fmtCover(s.stock_cover_months)} mo`}</td>
-                    <td>{s.next_calc_date === null ? '—' : fmtDate(s.next_calc_date)}</td>
-                    <td>
-                      <StatusChip status={s.status} zeroForecast={s.zero_forecast} />
-                    </td>
-                  </tr>
-                ))}
-                {rows.length === 0 && (
-                  <tr>
-                    <td colSpan={12} className="muted">
-                      No SKUs match the current filters.{' '}
-                      {filtersActive && (
-                        <button className="link-button" onClick={clearFilters}>
-                          Clear filters
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-            <p className="muted">
-              Buffer is the average of the valid monthly values; order qty brings stock (sellable plus SIT) up to
-              buffer × holding. Click a row to see the arithmetic.
-            </p>
+              <p className="muted">
+                Buffer is the average of the sales months above zero (greyed months are skipped). Each month&apos;s
+                order brings stock (sellable plus SIT) back up to buffer × holding. Click a row to see the arithmetic.
+              </p>
             </>
+          ) : (
+            <p className="muted">Recalculate to see the 12-month plan.</p>
           )}
         </div>
         {selectedSku && (
@@ -367,9 +356,9 @@ function PlanView({ runId }: { runId: number }) {
 }
 
 /** An order quantity cell: quantities above zero get the turmeric tag so what needs buying stands out. */
-function OrderCell({ qty, moqApplied }: { qty: number | null; moqApplied: boolean }) {
+function OrderCell({ qty, moqApplied, groupStart }: { qty: number | null; moqApplied: boolean; groupStart: boolean }) {
   return (
-    <td className={`num${qty !== null && qty > 0 ? ' order-qty' : ''}`}>
+    <td className={`num${groupStart ? ' group-start' : ''}${qty !== null && qty > 0 ? ' order-qty' : ''}`}>
       {qty === null ? '—' : qty > 0 ? <span className="qty">{fmtQty(qty)}</span> : fmtQty(qty)}
       {moqApplied && <span className="chip chip-grey tag">MOQ</span>}
     </td>

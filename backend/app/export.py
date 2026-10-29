@@ -57,11 +57,15 @@ def build_export(run: RunRecord) -> bytes:
 
     month_headers = ([f"{month_label(m)} Actual" for m in result.actual_months]
                      + [f"{month_label(m)} Forecast" for m in result.forecast_months])
+
+    def demand_row(sku) -> list:
+        by_month = {(d.source, d.month): d.value for d in sku.demand_values}
+        return ([by_month.get(("actual", m)) for m in result.actual_months]
+                + [by_month.get(("forecast", m)) for m in result.forecast_months])
+
     sku_rows = []
     for sku in result.skus:
-        by_month = {(d.source, d.month): d.value for d in sku.demand_values}
-        demand = ([by_month.get(("actual", m)) for m in result.actual_months]
-                  + [by_month.get(("forecast", m)) for m in result.forecast_months])
+        demand = demand_row(sku)
         sku_rows.append([
             sku.supplier, sku.sap_code, sku.description, sku.status.value, _yes_no(sku.zero_forecast),
             sku.sellable, sku.pg_sellable, sku.pdg_sellable, sku.sit, sku.available,
@@ -80,15 +84,21 @@ def build_export(run: RunRecord) -> bytes:
                       "Required", "MOQ", "MOQ Applied", "Order Qty", "Stock Cover (months)",
                       "Lead Time (days)", "Next Calculation Date"], sku_rows, formats)
 
-    # 12-month plan: one column per plan month (none for runs saved before it); a blocked SKU's cells stay blank
+    # 12-month plan, laid out like the plan page: settings, the 6 demand months, stock, then one order column
+    # per plan month (none for runs saved before it); a blocked SKU's order cells stay blank
     plan_headers = [month_label(m) for m in result.plan_months]
     twelve_rows = []
     for sku in result.skus:
         orders = [p.order for p in sku.monthly] if sku.monthly else [None] * len(plan_headers)
         total = None if sku.monthly is None or sku.holding_months is None else sum(o or 0 for o in orders)
-        twelve_rows.append([sku.supplier, sku.sap_code, sku.description, sku.status.value, *orders, total])
+        twelve_rows.append([sku.supplier, sku.sap_code, sku.description, sku.moq, sku.holding_months,
+                            sku.lead_time_days, *demand_row(sku), sku.buffer, sku.available, sku.target,
+                            *orders, total, sku.status.value])
     _write_sheet(wb.create_sheet("12-Month Plan"),
-                 ["Principal", "SAP Code", "Description", "Status", *plan_headers, "Total"], twelve_rows)
+                 ["Principal", "SAP Code", "Description", "MOQ", "Holding (months)", "Lead Time (days)",
+                  *month_headers, "Buffer", "Available", "Target", *[f"{h} Order" for h in plan_headers],
+                  "12-Month Total", "Status"], twelve_rows,
+                 {name: TWO_DECIMALS for name in [*month_headers, "Buffer", "Available", "Target"]})
 
     def monthly(s) -> list:
         return s.monthly_order_qty if s.monthly_order_qty is not None else [None] * len(plan_headers)

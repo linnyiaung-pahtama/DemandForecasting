@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  demandColumns,
   fmtDate,
   fmtQty,
   fmtTime,
@@ -304,6 +305,30 @@ describe('monthlyTotal', () => {
   it('is null when holding is not set or there is no 12-month plan', () => {
     expect(monthlyTotal({ ...worked, holding_months: null, monthly: [month('2026-10', null)] })).toBeNull()
     expect(monthlyTotal({ ...worked, monthly: null })).toBeNull()
+  })
+})
+
+describe('demandColumns', () => {
+  it('lines up the actual then forecast values with the plan months', () => {
+    const cols = demandColumns(worked, ['2026-07', '2026-08', '2026-09'], ['2026-10', '2026-11', '2026-12'])
+    expect(cols.map((d) => d?.value)).toEqual([100, 120, 110, 130, 140, 120])
+    expect(cols.map((d) => d?.source)).toEqual(['actual', 'actual', 'actual', 'forecast', 'forecast', 'forecast'])
+  })
+
+  it('is null for a month the SKU has no value for', () => {
+    const r = { ...worked, demand_values: worked.demand_values.filter((d) => d.month !== '2026-08') }
+    expect(demandColumns(r, ['2026-07', '2026-08'], []).map((d) => d?.value ?? null)).toEqual([100, null])
+  })
+
+  it('keeps an actual and a forecast for the same month apart', () => {
+    const r = {
+      ...worked,
+      demand_values: [
+        { month: '2026-10', source: 'actual' as const, value: 5, valid: true },
+        { month: '2026-10', source: 'forecast' as const, value: 9, valid: true },
+      ],
+    }
+    expect(demandColumns(r, ['2026-10'], ['2026-10']).map((d) => d?.value)).toEqual([5, 9])
   })
 })
 

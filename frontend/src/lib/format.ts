@@ -1,4 +1,4 @@
-import type { HoldingPlan, SkuResult, SkuStatus } from '../types'
+import type { DemandValue, HoldingPlan, SkuResult, SkuStatus } from '../types'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
@@ -138,6 +138,13 @@ export function isLegacyRun(plan: HoldingPlan): boolean {
 /** The plan carries a 12-month plan for every SKU (false for plans saved before it existed). */
 export function hasMonthly(plan: HoldingPlan): boolean {
   return plan.plan_months.length > 0 && plan.skus.every((s) => s.monthly !== null)
+}
+
+/** The SKU's demand value for each actual month, then each forecast month; null where it has none. */
+export function demandColumns(r: SkuResult, actualMonths: string[], forecastMonths: string[]): (DemandValue | null)[] {
+  const find = (source: DemandValue['source'], month: string) =>
+    r.demand_values.find((d) => d.source === source && d.month === month) ?? null
+  return [...actualMonths.map((m) => find('actual', m)), ...forecastMonths.map((m) => find('forecast', m))]
 }
 
 /** A SKU's total cartons over the 12 months; null when its holding is not set or it has no 12-month plan. */

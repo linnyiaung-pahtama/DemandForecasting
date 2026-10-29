@@ -189,18 +189,31 @@ MONTH_HEADERS = ["Oct 2026", "Nov 2026", "Dec 2026", "Jan 2027", "Feb 2027", "Ma
                  "Apr 2027", "May 2027", "Jun 2027", "Jul 2027", "Aug 2027", "Sep 2027"]
 
 
+SALES_HEADERS = ["Jul 2026 Actual", "Aug 2026 Actual", "Sep 2026 Actual",
+                 "Oct 2026 Forecast", "Nov 2026 Forecast", "Dec 2026 Forecast"]
+PLAN_SETTINGS_HEADERS = ["Principal", "SAP Code", "Description", "MOQ", "Holding (months)", "Lead Time (days)"]
+STOCK_HEADERS = ["Buffer", "Available", "Target"]
+
+
 def test_twelve_month_sheet():
     run = make_run(DATA, SALES, {"CFC": 3}, lead=7)
     wb = load(build_export(run))
     ws = wb["12-Month Plan"]
     header = [c.value for c in ws[1]]
-    assert header == ["Principal", "SAP Code", "Description", "Status", *MONTH_HEADERS, "Total"]
+    assert header == [*PLAN_SETTINGS_HEADERS, *SALES_HEADERS, *STOCK_HEADERS,
+                      *[f"{m} Order" for m in MONTH_HEADERS], "12-Month Total", "Status"]
     rows = {r[1]: r for r in ws.iter_rows(min_row=2, values_only=True)}
     sku = next(s for s in run.result.skus if s.sap_code == "3102111001")
     row = rows["3102111001"]
-    assert list(row[4:16]) == [p.order for p in sku.monthly] and row[16] == sum(p.order for p in sku.monthly)
+    assert list(row[:6]) == [sku.supplier, sku.sap_code, sku.description, sku.moq, 3, 7]
+    assert list(row[6:12]) == [d.value for d in sku.demand_values]
+    assert list(row[12:15]) == [sku.buffer, sku.available, sku.target]
+    assert list(row[15:27]) == [p.order for p in sku.monthly] and row[27] == sum(p.order for p in sku.monthly)
+    assert row[28] == sku.status.value
+    assert ws.cell(row=2, column=7).number_format == "0.00"   # sales and stock columns show 2 decimals
     blocked = next(s for s in run.result.skus if s.supplier != "CFC")
-    assert all(v is None for v in rows[blocked.sap_code][4:17])
+    brow = rows[blocked.sap_code]
+    assert brow[4] is None and brow[14] is None and all(v is None for v in brow[15:28])
     summary = wb["Principal Summary"]
     sheader = [c.value for c in summary[1]]
     assert sheader[-13:] == [*MONTH_HEADERS, "12-Month Total"]
@@ -214,5 +227,6 @@ def test_twelve_month_sheet_for_old_runs():
         s.monthly = None
     run.result.plan_months = []
     wb = load(build_export(run))
-    assert [c.value for c in wb["12-Month Plan"][1]] == ["Principal", "SAP Code", "Description", "Status", "Total"]
+    assert [c.value for c in wb["12-Month Plan"][1]] == [*PLAN_SETTINGS_HEADERS, *SALES_HEADERS, *STOCK_HEADERS,
+                                                          "12-Month Total", "Status"]
     assert [c.value for c in wb["Principal Summary"][1]][-1] == "12-Month Total"

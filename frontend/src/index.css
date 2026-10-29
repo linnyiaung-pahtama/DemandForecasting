@@ -506,21 +506,85 @@ tr.default-row {
   background: var(--warn-tint);
 }
 
-/* Plan tables: keep supplier and description readable on one or two lines; the table scrolls sideways instead. */
+/* The plan table: one wide table in column groups that scrolls sideways. The two header rows stay on top
+   as one block, and principal, SAP code and description stay on the left while the numbers scroll. */
+.plan-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+.plan-table th {
+  position: static;
+}
+
 .plan-table td {
   vertical-align: top;
 }
 
-.plan-table td:nth-child(1) {
-  min-width: 10rem;
+.plan-table th.group {
+  color: var(--ink);
+  background: var(--surface-alt);
 }
 
-.plan-table td:nth-child(2) {
+.plan-table .group-start {
+  border-left: 1px solid var(--line);
+}
+
+.plan-table td.skipped {
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+.plan-table .stick {
+  position: sticky;
+  z-index: 1;
+  background: var(--surface);
+}
+
+.plan-table th.stick {
+  z-index: 2;
+  background: var(--surface-alt);
+}
+
+.plan-table .stick-1 {
+  left: 0;
+  width: 9rem;
+  min-width: 9rem;
+  max-width: 9rem;
+}
+
+.plan-table .stick-2 {
+  left: 9rem;
+  width: 7.5rem;
+  min-width: 7.5rem;
   white-space: nowrap;
 }
 
-.plan-table td:nth-child(3) {
-  min-width: 18rem;
+.plan-table .stick-3 {
+  left: 16.5rem;
+  min-width: 16rem;
+  max-width: 16rem;
+  box-shadow: inset -1px 0 0 var(--line-strong);
+}
+
+.plan-table tbody tr:hover .stick {
+  background: #f3f7f6;
+}
+
+.plan-table tr.selected .stick {
+  background: var(--action-tint);
+}
+
+/* With the SKU detail open, or on a narrow screen, there is no room to pin three columns. */
+.plan-body.with-detail .plan-table .stick {
+  position: static;
+}
+
+@media (max-width: 900px) {
+  .plan-table .stick {
+    position: static;
+  }
 }
 
 /* Quantities that need ordering: the one turmeric element on the page. */
@@ -612,31 +676,6 @@ button.count-card.active:hover {
   font-weight: 600;
   line-height: 1.15;
   color: var(--ink);
-}
-
-.view-switch {
-  display: inline-flex;
-  margin-bottom: 0.9rem;
-  padding: 3px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-}
-
-.view-switch button,
-.view-switch button.primary {
-  height: 2rem;
-  padding: 0 1rem;
-  color: var(--muted);
-  background: transparent;
-  border: none;
-  border-radius: 6px;
-}
-
-.view-switch button[aria-pressed='true'],
-.view-switch button[aria-pressed='true']:hover:not(:disabled) {
-  color: #fff;
-  background: var(--ink);
 }
 
 .filters {

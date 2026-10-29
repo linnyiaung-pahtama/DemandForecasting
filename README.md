@@ -51,11 +51,11 @@ Then open http://localhost:5173. The frontend forwards `/api` requests to the ba
 ## Using it
 
 1. **New plan**: choose the four files (the Data file, the sales export, the PG Expiry Check and the PDG Stock List), check the detected months, the stock facts (SKUs with stock, sellable cartons from PG and from PDG, the PDG printed date and the PG as-of date), the plan date and any warnings, then click Calculate. Calculate is enabled once all four files inspect OK.
-2. **Order plan**: count cards (To order, Holding not set, No demand data, Zero forecast), a banner listing blocked principals, and filters for principal, status, the Zero forecast flag and search. A warnings panel above the table shows file-level warnings (labelled Data file, Sales export or Stock files; the stock report's name is in the message text) in full and counts the per-SKU warnings in a collapsible list. The plan header lists the four file names. Click a SKU to see its six demand values, its stock (available = PG sellable + PDG sellable + SIT, with non-sellable PG / PDG shown for information) and the arithmetic behind its order. The principal summary is reached from this page.
+2. **Order plan**: count cards (To order, Holding not set, No demand data, Zero forecast), a banner listing blocked principals, and filters for principal, status, the Zero forecast flag and search. A warnings panel above the table shows file-level warnings (labelled Data file, Sales export or Stock files; the stock report's name is in the message text) in full and counts the per-SKU warnings in a collapsible list. The plan header lists the four file names. The table has one row per SKU, in column groups: principal settings (MOQ, holding, lead time), the 3 actual sales months, the 3 forecast months (months not counted in the buffer are greyed), stock (buffer, available, target), the order for each of the 12 months, the 12-month total and the status. Principal, SAP code and description stay on the left while the table scrolls sideways. Click a SKU to see its six demand values, its stock (available = PG sellable + PDG sellable + SIT, with non-sellable PG / PDG shown for information) and the arithmetic behind its order. The principal summary is reached from this page.
 3. **Principal summary**: per principal, the holding, MOQ and lead time the plan used, SKU counts, total order cartons and blocked / no-demand SKUs. Expand a principal for the list of SKUs to put on one purchase order.
 4. **Principal settings**: Holding (months), MOQ (cartons) and Lead time (days) per principal, plus the change log (the newest 200 entries, newest first, one line per changed setting). Saving recalculates the latest run.
 5. **History**: reopen a past run exactly as it was calculated. Each run lists its file names (runs saved before the stock uploads show "—" for the two stock files).
-6. **Export**: Excel download with four sheets: SKU Plan (with PG Sellable, PDG Sellable, PG Non-Sellable and PDG Non-Sellable columns next to Available), Principal Summary, Settings Used and Warnings.
+6. **Export**: Excel download with five sheets: SKU Plan (with PG Sellable, PDG Sellable, PG Non-Sellable and PDG Non-Sellable columns next to Available), 12-Month Plan (the same columns as the plan page), Principal Summary, Settings Used and Warnings.
 
 ## The four uploads
 
@@ -181,10 +181,10 @@ Besides this cycle's order, each plan shows how much to order in each of the nex
 With the worked example above (buffer 120, holding 3, available 260, MOQ 150) the 12 orders are 150, 150, 150, 150, 0, 150, 150, 150, 150, 0, 150, 150. The MOQ overshoot builds stock until a month needs nothing. With MOQ 0 they are 100, then 120 every month.
 
 **Where it shows:**
-- the **12 months** switch on the Order plan page (one column per month plus a total, with the same filters);
+- the Order plan table (one order column per month plus a total, next to the settings, sales and stock that produce them);
 - a 12-month table (opening, demand, order, closing) in the SKU detail;
 - a **12-month orders** table on the Principal summary page;
-- a **12-Month Plan** sheet in the Excel export, with the monthly totals also on the Principal Summary sheet.
+- a **12-Month Plan** sheet in the Excel export, laid out like the plan page (MOQ, holding, lead time, the 6 sales months, buffer, available, target, one "<month> Order" column per month, 12-Month Total, status), with the monthly totals also on the Principal Summary sheet.
 
 Plans saved before the 12-month plan existed show "Recalculate to see the 12-month plan" until they are recalculated. No database upgrade is needed.
 
