@@ -39,7 +39,8 @@ def load(content: bytes) -> openpyxl.Workbook:
 
 def test_export_v2_sheets_and_values(tmp_path):
     c = TestClient(create_app(tmp_path / "t.db"))
-    assert c.put("/api/settings", json=[{"supplier": "CFC", "holding_months": 3}]).status_code == 200
+    item = {"supplier": "CFC", "holding_months": 3, "moq": 0, "lead_time_days": 7}
+    assert c.put("/api/settings", json=[item]).status_code == 200
     run = c.post("/api/runs", files={"data_file": ("d.xlsx", DATA), "sales_file": ("s.xlsx", SALES),
                                      "pg_file": ("pg.xlsx", DATA), "pdg_file": ("pdg.xlsx", DATA)}).json()
     r = c.get(f"/api/runs/{run['id']}/export")
@@ -74,14 +75,17 @@ def test_export_v2_sheets_and_values(tmp_path):
         "No Demand SKUs", "Zero Forecast SKUs"]
     assert summary.max_row == 18 and summary["A2"].value == "CFC"
     settings = wb["Settings Used"]
-    assert [cell.value for cell in settings[1]] == ["Supplier", "Holding (months)"]
+    assert [cell.value for cell in settings[1]] == ["Supplier", "Holding (months)", "MOQ", "Lead Time (days)"]
+    cfc = next(r for r in settings.iter_rows(min_row=2, values_only=True) if r[0] == "CFC")
+    assert cfc == ("CFC", 3, 0, 7)
     assert settings.max_row == 18
     warnings = wb["Warnings"]
     assert [cell.value for cell in warnings[1]] == ["Source", "SAP Code", "Column", "Message"]
-    # the real Data file carries 14 warnings (the ignored stock columns, 10 negative MTD, 3 zero shelf life);
-    # the sales export none; the stock reports hold codes that are not in the Data sheet (one warning each)
+    # the real Data file carries 15 warnings (the ignored stock columns, the ignored MOQ/Lead Time columns,
+    # 10 negative MTD, 3 zero shelf life); the sales export none; the stock reports hold codes that are not
+    # in the Data sheet (one warning each)
     sources = [r[0] for r in warnings.iter_rows(min_row=2, values_only=True)]
-    assert sources == ["Data file"] * 14 + ["Stock files"] * 2
+    assert sources == ["Data file"] * 15 + ["Stock files"] * 2
 
 
 def test_export_stock_columns_and_warnings():
@@ -170,3 +174,12 @@ def test_export_strips_illegal_characters_and_labels_warning_sources():
     rows = [[c.value for c in r] for r in wb["Warnings"].iter_rows(min_row=2)]
     assert rows == [["Data file", "F1", "MOQ", "from data"], ["Sales export", None, None, "from sales"]]
     assert wb["Settings Used"]["B2"].value is None  # holding not set -> blank
+
+
+def test_settings_used_sheet_is_blank_for_old_runs():
+    run = make_run(DATA, SALES, {"CFC": 3})
+    run.result.settings_used = [s.model_copy(update={"moq": None, "lead_time_days": None})
+                                for s in run.result.settings_used]   # as a run saved before supplier MOQ/lead time
+    ws = load(build_export(run))["Settings Used"]
+    assert [c.value for c in ws[1]] == ["Supplier", "Holding (months)", "MOQ", "Lead Time (days)"]
+    assert next(r for r in ws.iter_rows(min_row=2, values_only=True) if r[0] == "CFC") == ("CFC", 3, None, None)

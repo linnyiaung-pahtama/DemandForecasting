@@ -208,11 +208,13 @@ class SupplierSummary(BaseModel):
     blocked_skus: int
     no_demand_skus: int
     zero_forecast_skus: int
-    max_lead_time_days: int | None
+    moq: float | None  # from the plan's settings_used; None for runs saved before supplier MOQ/lead time
+    lead_time_days: int | None
 
 
 class SupplierSettingView(BaseModel):
     supplier: str
     holding_months: float | None
+    moq: float
+    lead_time_days: int | None
     sku_count: int
-    max_lead_time_days: int | None

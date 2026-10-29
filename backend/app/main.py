@@ -21,6 +21,7 @@ from app.stock import PDG_NAME, PG_NAME, apply_stock, parse_pdg, parse_pg, stock
 from app.summary import summarize_suppliers
 
 MIN_HOLDING, MAX_HOLDING = 0.5, 24
+MAX_LEAD_TIME_DAYS = 365
 
 
 def _parse_uploads(data_file: UploadFile, sales_file: UploadFile, pg_file: UploadFile,
@@ -55,22 +56,40 @@ def _parse_plan_date(text: str | None) -> date | None:
         raise HTTPException(status_code=422, detail=f"Plan date '{text}' is not a valid date (use YYYY-MM-DD).") from exc
 
 
-def _parse_holdings(items: list[Any]) -> list[SupplierSettings]:
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _is_whole(value: Any) -> bool:
+    return _is_number(value) and float(value).is_integer()
+
+
+def _parse_settings(items: list[Any]) -> list[SupplierSettings]:
     """Validate the raw PUT body so every bad value is reported with its supplier's name."""
-    holdings: list[SupplierSettings] = []
+    settings: list[SupplierSettings] = []
     for raw in items:
-        if not isinstance(raw, dict) or not isinstance(raw.get("supplier"), str) or "holding_months" not in raw:
+        if (not isinstance(raw, dict) or not isinstance(raw.get("supplier"), str)
+                or any(key not in raw for key in ("holding_months", "moq", "lead_time_days"))):
             raise HTTPException(
-                status_code=422, detail="Each setting needs a supplier name and a holding_months value.")
-        name, value = raw["supplier"], raw["holding_months"]
-        is_number = isinstance(value, (int, float)) and not isinstance(value, bool)
-        if value is not None and not (is_number and MIN_HOLDING <= value <= MAX_HOLDING):
+                status_code=422,
+                detail="Each setting needs a supplier name and holding_months, moq and lead_time_days values.")
+        name, holding, moq, lead = raw["supplier"], raw["holding_months"], raw["moq"], raw["lead_time_days"]
+        if holding is not None and not (_is_number(holding) and MIN_HOLDING <= holding <= MAX_HOLDING):
             raise HTTPException(
                 status_code=422,
                 detail=f"Supplier '{name}': holding must be between {MIN_HOLDING:g} and {MAX_HOLDING:g} "
                        f"months, or blank.")
-        holdings.append(SupplierSettings(supplier=name, holding_months=value))
-    return holdings
+        if not (_is_whole(moq) and moq >= 0):
+            raise HTTPException(
+                status_code=422, detail=f"Supplier '{name}': MOQ must be a whole number of cartons, 0 or more.")
+        if lead is not None and not (_is_whole(lead) and 0 <= lead <= MAX_LEAD_TIME_DAYS):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Supplier '{name}': lead time must be a whole number of days from 0 to "
+                       f"{MAX_LEAD_TIME_DAYS}, or blank.")
+        settings.append(SupplierSettings(supplier=name, holding_months=holding, moq=float(moq),
+                                         lead_time_days=None if lead is None else int(lead)))
+    return settings
 
 
 def create_app(db_path: Path | None = None) -> FastAPI:
@@ -79,9 +98,6 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     app = FastAPI(title="Order Plan Tool")
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"],
                        allow_methods=["*"], allow_headers=["*"])
-
-    def holdings() -> dict[str, float]:  # stop-gap until planning takes supplier settings
-        return {k: v.holding_months for k, v in repo.get_settings().items() if v.holding_months is not None}
 
     def get_run_or_404(run_id: int) -> RunRecord:
         run = repo.get_run(run_id)
@@ -155,20 +171,21 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                         headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
     def settings_views() -> list[SupplierSettingView]:
-        stored = holdings()
-        stats: dict[str, tuple[int, int | None]] = {}
+        """Every supplier in the latest run or the stored settings; one with no stored row shows
+        holding not set, MOQ 0 and no lead time."""
+        stored = repo.get_settings()
+        counts: dict[str, int] = {}
         latest = repo.latest_run_id()
         if latest is not None:
             for sku in get_run_or_404(latest).result.skus:
-                count, lead = stats.get(sku.supplier, (0, None))
-                if sku.lead_time_days is not None:
-                    lead = sku.lead_time_days if lead is None else max(lead, sku.lead_time_days)
-                stats[sku.supplier] = (count + 1, lead)
-        return [
-            SupplierSettingView(supplier=name, holding_months=stored.get(name),
-                                sku_count=stats.get(name, (0, None))[0],
-                                max_lead_time_days=stats.get(name, (0, None))[1])
-            for name in sorted(set(stats) | set(stored))]
+                counts[sku.supplier] = counts.get(sku.supplier, 0) + 1
+        views = []
+        for name in sorted(set(counts) | set(stored)):
+            s = stored.get(name)
+            views.append(SupplierSettingView(
+                supplier=name, holding_months=s.holding_months if s else None, moq=s.moq if s else 0,
+                lead_time_days=s.lead_time_days if s else None, sku_count=counts.get(name, 0)))
+        return views
 
     @app.get("/api/settings", response_model=list[SupplierSettingView])
     def get_settings() -> list[SupplierSettingView]:
@@ -176,11 +193,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
 
     @app.put("/api/settings", response_model=list[SupplierSettingView])
     def put_settings(items: list[Any]) -> list[SupplierSettingView]:
-        stored = repo.get_settings()  # stop-gap until the settings API takes MOQ and lead time
-        repo.save_settings([h.model_copy(update={"moq": stored[h.supplier].moq if h.supplier in stored else 0,
-                                                 "lead_time_days": stored[h.supplier].lead_time_days
-                                                 if h.supplier in stored else None})
-                            for h in _parse_holdings(items)])
+        repo.save_settings(_parse_settings(items))
         return settings_views()
 
     @app.get("/api/settings/log", response_model=list[SettingsLogEntry])

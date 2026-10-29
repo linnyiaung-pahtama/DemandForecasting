@@ -19,7 +19,7 @@ def _parsed_with_stock():
 def test_summary_rolls_up_real_fixtures():
     parsed = _parsed_with_stock()
     actual = actual_cartons(parse_sales((FIX / "sales_export.xlsx").read_bytes()), parsed)
-    result = plan_all(parsed, actual, holding_settings({"CFC": 3}), date(2026, 10, 12))
+    result = plan_all(parsed, actual, holding_settings({"CFC": 3}, moq=40, lead=7), date(2026, 10, 12))
     summary = summarize_suppliers(result)
     cfc = next(s for s in summary if s.supplier == "CFC")
     cfc_skus = [s for s in result.skus if s.supplier == "CFC"]
@@ -28,6 +28,9 @@ def test_summary_rolls_up_real_fixtures():
     assert cfc.skus_to_order == sum(1 for s in cfc_skus if s.order_qty > 0)
     assert all(s.blocked_skus == s.sku_count for s in summary if s.supplier != "CFC")
     assert summary[0].supplier == "CFC"
+    assert (cfc.moq, cfc.lead_time_days) == (40, 7)
+    other = next(s for s in summary if s.supplier != "CFC")
+    assert (other.moq, other.lead_time_days) == (0, None)   # no stored settings: MOQ 0, no lead time
 
 
 def test_zero_total_suppliers_sort_by_name():
@@ -36,3 +39,13 @@ def test_zero_total_suppliers_sort_by_name():
     summary = summarize_suppliers(plan_all(parsed, actual, {}, date(2026, 10, 12)))
     assert all(s.total_order_qty == 0 for s in summary)
     assert [s.supplier for s in summary] == sorted(s.supplier for s in summary)
+
+
+def test_old_run_settings_used_loads():
+    from app.models import HoldingPlan
+    plan = HoldingPlan.model_validate({
+        "plan_date": "2026-10-12", "actual_months": [], "forecast_months": [], "skus": [],
+        "settings_used": [{"supplier": "CFC", "holding_months": 3}], "blocked_suppliers": [],
+        "counts": {"TO_ORDER": 0}})
+    [s] = summarize_suppliers(plan)
+    assert s.supplier == "CFC" and s.holding_months == 3 and s.moq is None and s.lead_time_days is None

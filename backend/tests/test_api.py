@@ -12,6 +12,11 @@ def client(tmp_path):
     return TestClient(create_app(tmp_path / "t.db"))
 
 
+def row(supplier, holding, moq=0, lead=None):
+    """One PUT /api/settings item; every key is required."""
+    return {"supplier": supplier, "holding_months": holding, "moq": moq, "lead_time_days": lead}
+
+
 def files(data=DATA, sales=SALES, pg=DATA, pdg=DATA):
     """The fixture workbook carries the Data sheet and both stock sheets, so it serves as PG and PDG too."""
     return {"data_file": ("data.xlsx", data), "sales_file": ("sales.xlsx", sales),
@@ -35,7 +40,7 @@ def test_new_run_blocks_all_suppliers_until_holding_set(client):
 
 def test_set_holding_recalculates_real_sku(client):
     run = client.post("/api/runs", files=files()).json()
-    assert client.put("/api/settings", json=[{"supplier": "CFC", "holding_months": 3}]).status_code == 200
+    assert client.put("/api/settings", json=[row("CFC", 3, lead=7)]).status_code == 200
     rec = client.post(f"/api/runs/{run['id']}/recalculate").json()
     sku = next(x for x in rec["result"]["skus"] if x["sap_code"] == "3102111001")
     # actuals 2113/40, 1451/40, 1647/40; forecast 55, 55, 55 -> buffer 49.2125
@@ -44,13 +49,14 @@ def test_set_holding_recalculates_real_sku(client):
     assert sku["order_qty"] == 110 and sku["status"] == "TO_ORDER"
     assert sku["next_calc_date"] == "2026-10-19"
     log = client.get("/api/settings/log").json()
-    assert log[0]["supplier"] == "CFC" and log[0]["old_value"] is None and log[0]["new_value"] == 3
+    holding = next(e for e in log if e["field"] == "holding_months")
+    assert holding["supplier"] == "CFC" and holding["old_value"] is None and holding["new_value"] == 3
 
 
 def test_holding_validation(client):
     for bad in (0, 25, "abc"):
-        assert client.put("/api/settings", json=[{"supplier": "A", "holding_months": bad}]).status_code == 422
-    assert client.put("/api/settings", json=[{"supplier": "A", "holding_months": None}]).status_code == 200
+        assert client.put("/api/settings", json=[row("A", bad)]).status_code == 422
+    assert client.put("/api/settings", json=[row("A", None)]).status_code == 200
 
 
 def test_swapped_files_return_400(client):
@@ -101,12 +107,12 @@ def test_export_route(client):
 
 def test_holding_bounds_accepted(client):
     for ok in (0.5, 24, 1.5):
-        assert client.put("/api/settings", json=[{"supplier": "A", "holding_months": ok}]).status_code == 200
+        assert client.put("/api/settings", json=[row("A", ok)]).status_code == 200
 
 
 def test_holding_error_names_supplier_and_rejects_non_numbers(client):
     for bad in (0, 25, "abc", True, [3]):
-        r = client.put("/api/settings", json=[{"supplier": "Acme", "holding_months": bad}])
+        r = client.put("/api/settings", json=[row("Acme", bad)])
         assert r.status_code == 422
         assert r.json()["detail"] == "Supplier 'Acme': holding must be between 0.5 and 24 months, or blank."
 
@@ -114,8 +120,8 @@ def test_holding_error_names_supplier_and_rejects_non_numbers(client):
 def test_failed_batch_saves_nothing(client):
     client.post("/api/runs", files=files())
     before = client.get("/api/settings").json()
-    r = client.put("/api/settings", json=[{"supplier": "CFC", "holding_months": 3},
-                                          {"supplier": "Bad", "holding_months": 99}])
+    r = client.put("/api/settings", json=[row("CFC", 3),
+                                          row("Bad", 99)])
     assert r.status_code == 422
     assert client.get("/api/settings").json() == before
     assert client.get("/api/settings/log").json() == []
@@ -200,3 +206,38 @@ def test_run_stores_stock_and_date_warning(client):
     rec = client.post(f"/api/runs/{run['id']}/recalculate").json()
     assert rec["stock"] == run["stock"]
     assert client.get("/api/runs").json()[0]["pdg_file_name"] == "pdg.xlsx"
+
+
+MOQ_ERROR = "Supplier 'Acme': MOQ must be a whole number of cartons, 0 or more."
+LEAD_ERROR = "Supplier 'Acme': lead time must be a whole number of days from 0 to 365, or blank."
+
+
+def test_settings_round_trip(client):
+    client.post("/api/runs", files=files())
+    assert client.put("/api/settings", json=[row("CFC", 3, moq=200, lead=7)]).status_code == 200
+    s = {x["supplier"]: x for x in client.get("/api/settings").json()}
+    assert (s["CFC"]["holding_months"], s["CFC"]["moq"], s["CFC"]["lead_time_days"], s["CFC"]["sku_count"]) == (3, 200, 7, 5)
+    assert all(x["moq"] == 0 and x["lead_time_days"] is None for name, x in s.items() if name != "CFC")
+    log = client.get("/api/settings/log").json()
+    assert sorted((e["supplier"], e["field"], e["new_value"]) for e in log) == [
+        ("CFC", "holding_months", 3), ("CFC", "lead_time_days", 7), ("CFC", "moq", 200)]
+
+
+def test_settings_validation_moq_and_lead(client):
+    for bad in (-1, 1.5, True, "x", None):
+        r = client.put("/api/settings", json=[row("Acme", 2, moq=bad)])
+        assert r.status_code == 422 and r.json()["detail"] == MOQ_ERROR, bad
+    for bad in (-1, 366, 2.5, True):
+        r = client.put("/api/settings", json=[row("Acme", 2, lead=bad)])
+        assert r.status_code == 422 and r.json()["detail"] == LEAD_ERROR, bad
+    r = client.put("/api/settings", json=[row("Good", 2, moq=8000.0, lead=None), row("Acme", 2, moq=-1)])
+    assert r.status_code == 422 and client.get("/api/settings/log").json() == []
+    assert client.put("/api/settings", json=[row("Good", 2, moq=8000.0, lead=None)]).status_code == 200
+    good = next(x for x in client.get("/api/settings").json() if x["supplier"] == "Good")
+    assert good["moq"] == 8000 and good["lead_time_days"] is None
+
+
+def test_settings_missing_keys_returns_422(client):
+    r = client.put("/api/settings", json=[{"supplier": "A", "holding_months": 3}])
+    assert r.status_code == 422
+    assert r.json()["detail"] == "Each setting needs a supplier name and holding_months, moq and lead_time_days values."

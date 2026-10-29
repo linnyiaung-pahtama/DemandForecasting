@@ -87,8 +87,8 @@ def build_export(run: RunRecord) -> bytes:
                    s.blocked_skus, s.no_demand_skus, s.zero_forecast_skus]
                   for s in summarize_suppliers(result)])
 
-    _write_sheet(wb.create_sheet("Settings Used"), ["Supplier", "Holding (months)"],
-                 [[s.supplier, s.holding_months] for s in result.settings_used])
+    _write_sheet(wb.create_sheet("Settings Used"), ["Supplier", "Holding (months)", "MOQ", "Lead Time (days)"],
+                 [[s.supplier, s.holding_months, s.moq, s.lead_time_days] for s in result.settings_used])
 
     warnings = ([("Data file", w) for w in run.parsed.warnings]
                 + [("Sales export", w) for w in run.actual.warnings]
