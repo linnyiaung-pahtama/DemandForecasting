@@ -10,6 +10,11 @@ export function readMode(params: URLSearchParams): PlanMode {
   return params.get('mode') === 'forecast' ? 'forecast' : 'plan'
 }
 
+/** The query string that keeps the mode when linking to another page ("" for the default, the order plan). */
+export function modeQuery(mode: PlanMode): string {
+  return mode === 'forecast' ? '?mode=forecast' : ''
+}
+
 /** Every SKU carries an order plan (false for plans saved before the order cycle setting). */
 export function hasOrderPlan(plan: HoldingPlan): boolean {
   return plan.skus.every((s) => s.order_plan !== null)

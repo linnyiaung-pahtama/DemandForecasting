@@ -8,6 +8,7 @@ import {
   validateHolding,
   validateLeadTime,
   validateMoq,
+  validateOrderCycle,
   type EditedSettings,
   type Parsed,
 } from '../lib/settings'
@@ -22,12 +23,14 @@ interface Draft {
   holding: string
   moq: string
   lead: string
+  cycle: string
 }
 
 interface Checks {
   holding: Parsed
   moq: Parsed
   lead: Parsed
+  cycle: Parsed
 }
 
 function toDrafts(rows: SupplierSettingView[]): Record<string, Draft> {
@@ -37,6 +40,7 @@ function toDrafts(rows: SupplierSettingView[]): Record<string, Draft> {
       holding: r.holding_months === null ? '' : fmtMonths(r.holding_months),
       moq: String(r.moq),
       lead: r.lead_time_days === null ? '' : String(r.lead_time_days),
+      cycle: String(r.order_cycle_months),
     }
   }
   return drafts
@@ -49,7 +53,7 @@ const FIELD_LABEL: Record<SettingField, string> = {
   order_cycle_months: 'Order cycle',
 }
 
-const EMPTY: Draft = { holding: '', moq: '', lead: '' }
+const EMPTY: Draft = { holding: '', moq: '', lead: '', cycle: '' }
 
 export default function SettingsPage() {
   const [rows, setRows] = useState<SupplierSettingView[] | null>(null)
@@ -89,23 +93,28 @@ export default function SettingsPage() {
     const out: Record<string, Checks> = {}
     for (const r of rows ?? []) {
       const d = drafts[r.supplier] ?? EMPTY
-      out[r.supplier] = { holding: validateHolding(d.holding), moq: validateMoq(d.moq), lead: validateLeadTime(d.lead) }
+      out[r.supplier] = {
+        holding: validateHolding(d.holding),
+        moq: validateMoq(d.moq),
+        lead: validateLeadTime(d.lead),
+        cycle: validateOrderCycle(d.cycle),
+      }
     }
     return out
   }, [rows, drafts])
 
-  const hasErrors = Object.values(checks).some((c) => c.holding.error || c.moq.error || c.lead.error)
+  const hasErrors = Object.values(checks).some((c) => c.holding.error || c.moq.error || c.lead.error || c.cycle.error)
 
   const changes = useMemo(() => {
     const edited: Record<string, EditedSettings> = {}
     for (const r of rows ?? []) {
       const c = checks[r.supplier]
-      if (c && !c.holding.error && !c.moq.error && !c.lead.error && c.moq.value !== null) {
+      if (c && !c.holding.error && !c.moq.error && !c.lead.error && c.moq.value !== null && c.cycle.value !== null) {
         edited[r.supplier] = {
           holding_months: c.holding.value,
           moq: c.moq.value,
           lead_time_days: c.lead.value,
-          order_cycle_months: r.order_cycle_months,
+          order_cycle_months: c.cycle.value,
         }
       }
     }
@@ -168,7 +177,9 @@ export default function SettingsPage() {
       <p className="muted">
         Holding is how many months of stock to keep for each principal. Order = average monthly demand × holding −
         (sellable + SIT). An order above 0 but below the principal's MOQ is raised to the MOQ; the MOQ applies to each
-        SKU of the principal on its own (0 = no minimum). Lead time only sets the next calculation date.
+        SKU of the principal on its own (0 = no minimum). Lead time only sets the next calculation date. Order cycle is
+        how often each principal is ordered from: 3 means one order every three months, each covering the months until the
+        next order (1 = every month).
       </p>
 
       {loadError && (
@@ -194,6 +205,7 @@ export default function SettingsPage() {
                   <th>Holding (months)</th>
                   <th>MOQ (cartons)</th>
                   <th>Lead time (days)</th>
+                  <th>Order cycle (months)</th>
                   <th>Notes</th>
                 </tr>
               </thead>
@@ -201,7 +213,9 @@ export default function SettingsPage() {
                 {rows.map((r) => {
                   const c = checks[r.supplier]
                   const d = drafts[r.supplier] ?? EMPTY
-                  const errors = c ? [c.holding.error, c.moq.error, c.lead.error].filter((e): e is string => e !== null) : []
+                  const errors = c
+                    ? [c.holding.error, c.moq.error, c.lead.error, c.cycle.error].filter((e): e is string => e !== null)
+                    : []
                   return (
                     <tr key={r.supplier} className={r.holding_months === null ? 'default-row' : undefined}>
                       <td>{r.supplier}</td>
@@ -236,6 +250,17 @@ export default function SettingsPage() {
                           aria-invalid={Boolean(c?.lead.error)}
                           value={d.lead}
                           onChange={(e) => edit(r.supplier, 'lead', e.target.value)}
+                          style={{ width: '4.5rem' }}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          aria-label={'Order cycle months for ' + r.supplier}
+                          aria-invalid={Boolean(c?.cycle.error)}
+                          value={d.cycle}
+                          onChange={(e) => edit(r.supplier, 'cycle', e.target.value)}
                           style={{ width: '4.5rem' }}
                         />
                       </td>

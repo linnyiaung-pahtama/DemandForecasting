@@ -678,6 +678,37 @@ button.count-card.active:hover {
   color: var(--ink);
 }
 
+/* Order plan | Order demand forecast: which plan the order figures come from. */
+.mode-switch {
+  display: inline-flex;
+  margin-bottom: 1rem;
+  padding: 3px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.mode-switch button {
+  height: 2rem;
+  padding: 0 1rem;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+}
+
+.mode-switch button[aria-pressed='true'],
+.mode-switch button[aria-pressed='true']:hover:not(:disabled) {
+  color: #fff;
+  background: var(--ink);
+}
+
+/* A month between order-plan orders: no order is placed, which differs from an order month that needs 0. */
+td.not-order {
+  color: var(--muted);
+  font-weight: 700;
+}
+
 .filters {
   display: flex;
   flex-wrap: wrap;

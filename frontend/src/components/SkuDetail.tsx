@@ -1,15 +1,19 @@
 import { fmtExact, fmtMonths, fmtQty, monthLabel, orderExplanation } from '../lib/format'
+import { MODE_LABEL, orderCell, skuView, type PlanMode } from '../lib/mode'
 import type { ParseWarning, SkuResult } from '../types'
 import StatusChip from './StatusChip'
 
 interface Props {
   sku: SkuResult
   planDate: string
+  mode: PlanMode // the page's mode: the order, status, arithmetic and 12 months shown are that plan's
   warnings: ParseWarning[] // warnings for this SAP code only
   onClose: () => void
 }
 
-export default function SkuDetail({ sku, planDate, warnings, onClose }: Props) {
+export default function SkuDetail({ sku, planDate, mode, warnings, onClose }: Props) {
+  const view = skuView(sku, mode)
+  const cycle = sku.order_cycle_months
   return (
     <aside className="detail" aria-label={`Details for ${sku.sap_code}`}>
       <div className="detail-head">
@@ -19,7 +23,7 @@ export default function SkuDetail({ sku, planDate, warnings, onClose }: Props) {
           </h2>
           <div className="muted">{sku.supplier}</div>
           <div>
-            <StatusChip status={sku.status} zeroForecast={sku.zero_forecast} />
+            <StatusChip status={view.status} zeroForecast={sku.zero_forecast} />
           </div>
         </div>
         <button onClick={onClose} aria-label="Close details">
@@ -30,11 +34,15 @@ export default function SkuDetail({ sku, planDate, warnings, onClose }: Props) {
       <dl className="facts">
         <div>
           <dt>Order qty</dt>
-          <dd>{sku.order_qty === null ? '—' : `${fmtQty(sku.order_qty)} cartons`}</dd>
+          <dd>{view.orderQty === null ? '—' : `${fmtQty(view.orderQty)} cartons`}</dd>
         </div>
         <div>
           <dt>Holding</dt>
           <dd>{sku.holding_months === null ? 'Not set' : `${fmtMonths(sku.holding_months)} months`}</dd>
+        </div>
+        <div>
+          <dt>Order cycle</dt>
+          <dd>{cycle === null ? '—' : cycle === 1 ? 'every month' : `every ${cycle} months`}</dd>
         </div>
         <div>
           <dt>Lead time</dt>
@@ -90,15 +98,21 @@ export default function SkuDetail({ sku, planDate, warnings, onClose }: Props) {
 
       <h3>How this is worked out</h3>
       <ol className="steps">
-        {orderExplanation(sku, planDate).map((line, i) => (
+        {orderExplanation(sku, planDate, mode).map((line, i) => (
           <li key={i}>{line}</li>
         ))}
       </ol>
 
-      {sku.monthly !== null && (
+      {view.months !== null && (
         <>
-          <h3>12-month plan</h3>
-          <p className="muted">Demand each month = buffer (average of the valid values above).</p>
+          <h3>{MODE_LABEL[mode]}</h3>
+          <p className="muted">
+            Demand each month = buffer (average of the valid values above).
+            {mode === 'plan' &&
+              cycle !== null &&
+              cycle > 1 &&
+              ` Orders are placed every ${cycle} months; · marks the months between orders.`}
+          </p>
           <table>
             <thead>
               <tr>
@@ -110,18 +124,21 @@ export default function SkuDetail({ sku, planDate, warnings, onClose }: Props) {
               </tr>
             </thead>
             <tbody>
-              {sku.monthly.map((m) => (
-                <tr key={m.month}>
-                  <td>{monthLabel(m.month)}</td>
-                  <td className="num">{fmtExact(m.opening)}</td>
-                  <td className="num">{fmtExact(m.demand)}</td>
-                  <td className="num">
-                    {m.order === null ? '—' : fmtQty(m.order)}
-                    {m.moq_applied && <span className="chip chip-grey tag">MOQ</span>}
-                  </td>
-                  <td className="num">{fmtExact(m.closing)}</td>
-                </tr>
-              ))}
+              {view.months.map((m) => {
+                const kind = orderCell(m)
+                return (
+                  <tr key={m.month} className={kind === 'not-order-month' ? 'muted' : undefined}>
+                    <td>{monthLabel(m.month)}</td>
+                    <td className="num">{fmtExact(m.opening)}</td>
+                    <td className="num">{fmtExact(m.demand)}</td>
+                    <td className="num" title={kind === 'not-order-month' ? 'Not an order month' : undefined}>
+                      {kind === 'blocked' ? '—' : kind === 'not-order-month' ? '·' : fmtQty(m.order ?? 0)}
+                      {m.moq_applied && <span className="chip chip-grey tag">MOQ</span>}
+                    </td>
+                    <td className="num">{fmtExact(m.closing)}</td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </>

@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { hasOrderPlan, MODE_LABEL, modeCounts, orderCell, poLines, readMode, skuView, summaryView } from './mode'
+import {
+  hasOrderPlan,
+  MODE_LABEL,
+  modeCounts,
+  modeQuery,
+  orderCell,
+  poLines,
+  readMode,
+  skuView,
+  summaryView,
+} from './mode'
 import type { HoldingPlan, MonthPlan, SkuResult, SupplierSummary } from '../types'
 
 const month = (key: string, order: number | null, order_month = true, moq_applied = false): MonthPlan => ({
@@ -47,6 +57,12 @@ describe('readMode', () => {
     expect(readMode(new URLSearchParams('mode=plan'))).toBe('plan')
     expect(readMode(new URLSearchParams('mode=other'))).toBe('plan')
     expect(readMode(new URLSearchParams('mode=forecast'))).toBe('forecast')
+  })
+
+  it('builds the query string that keeps the mode in a link', () => {
+    expect(modeQuery('plan')).toBe('')
+    expect(modeQuery('forecast')).toBe('?mode=forecast')
+    expect(readMode(new URLSearchParams(modeQuery('forecast')))).toBe('forecast')
   })
 
   it('labels both modes', () => {

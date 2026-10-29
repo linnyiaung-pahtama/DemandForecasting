@@ -1,23 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { errorText, exportUrl, getRun, recalculate } from '../api'
+import ModeSwitch from '../components/ModeSwitch'
 import SkuDetail from '../components/SkuDetail'
 import StatusChip from '../components/StatusChip'
 import WarningsPanel from '../components/WarningsPanel'
 import { filterSkus } from '../lib/filters'
 import type { SkuFilter } from '../lib/filters'
-import {
-  demandColumns,
-  fmtDate,
-  fmtMonths,
-  fmtQty,
-  hasMonthly,
-  isLegacyRun,
-  monthLabel,
-  monthlyTotal,
-  statusLabel,
-} from '../lib/format'
-import type { RunRecord, SkuStatus } from '../types'
+import { demandColumns, fmtDate, fmtMonths, fmtQty, hasMonthly, isLegacyRun, monthLabel, statusLabel } from '../lib/format'
+import { hasOrderPlan, MODE_LABEL, modeCounts, modeQuery, orderCell, skuView } from '../lib/mode'
+import { usePlanMode } from '../lib/usePlanMode'
+import type { MonthPlan, RunRecord, SkuStatus } from '../types'
 
 const STATUSES: SkuStatus[] = ['TO_ORDER', 'NO_ORDER_NEEDED', 'HOLDING_NOT_SET', 'NO_DEMAND_DATA']
 
@@ -45,6 +38,7 @@ function PlanView({ runId }: { runId: number }) {
   const [zeroForecastOnly, setZeroForecastOnly] = useState(false)
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
+  const [mode, setMode] = usePlanMode()
 
   // Id of the run currently shown; lets a slow recalculate response be ignored after navigation.
   const currentRunId = useRef(runId)
@@ -74,8 +68,8 @@ function PlanView({ runId }: { runId: number }) {
   const rows = useMemo(() => {
     if (!result) return []
     const f: SkuFilter = { supplier, status, zeroForecastOnly, search }
-    return filterSkus(result.skus, f)
-  }, [result, supplier, status, zeroForecastOnly, search])
+    return filterSkus(result.skus, f, mode)
+  }, [result, supplier, status, zeroForecastOnly, search, mode])
 
   const selectedSku = useMemo(
     () => (result && selected ? (result.skus.find((s) => s.sap_code === selected) ?? null) : null),
@@ -131,9 +125,12 @@ function PlanView({ runId }: { runId: number }) {
   }
 
   const blocked = result.blocked_suppliers.length
-  // product 3 + settings 3 + sales months + stock 3 + order months + total + status
+  const counts = modeCounts(result, mode)
+  // An older run has no order plan: its order-plan view asks for a recalculation instead.
+  const showTable = hasMonthly(result) && (mode === 'forecast' || hasOrderPlan(result))
+  // product 3 + settings 4 + sales months + stock 3 + order months + total + status
   const columnCount =
-    3 + 3 + result.actual_months.length + result.forecast_months.length + 3 + result.plan_months.length + 2
+    3 + 4 + result.actual_months.length + result.forecast_months.length + 3 + result.plan_months.length + 2
 
   return (
     <div className="plan">
@@ -152,7 +149,7 @@ function PlanView({ runId }: { runId: number }) {
           )}
         </div>
         <div className="plan-actions">
-          <Link className="btn" to={`/runs/${runId}/suppliers`}>
+          <Link className="btn" to={`/runs/${runId}/suppliers${modeQuery(mode)}`}>
             Principal summary
           </Link>
           <button onClick={onRecalculate} disabled={busy}>
@@ -183,6 +180,8 @@ function PlanView({ runId }: { runId: number }) {
         stockWarnings={run.stock?.warnings ?? []}
       />
 
+      <ModeSwitch mode={mode} onChange={setMode} />
+
       <div className="cards">
         {CARDS.map((c) => (
           <button
@@ -191,7 +190,7 @@ function PlanView({ runId }: { runId: number }) {
             onClick={() => onCardClick(c)}
             aria-pressed={isActive(c)}
           >
-            <span className="count">{result.counts[c.key] ?? 0}</span>
+            <span className="count">{counts === null ? '—' : (counts[c.key] ?? 0)}</span>
             <span>{c.label}</span>
           </button>
         ))}
@@ -244,7 +243,7 @@ function PlanView({ runId }: { runId: number }) {
 
       <div className={`plan-body${selectedSku ? ' with-detail' : ''}`}>
         <div className="table-wrap">
-          {hasMonthly(result) ? (
+          {showTable ? (
             <>
               <table className="plan-table">
                 <thead>
@@ -252,11 +251,13 @@ function PlanView({ runId }: { runId: number }) {
                     <th rowSpan={2} className="stick stick-1">Principal</th>
                     <th rowSpan={2} className="stick stick-2">SAP Code</th>
                     <th rowSpan={2} className="stick stick-3">Description</th>
-                    <th colSpan={3} className="group group-start">Principal settings</th>
+                    <th colSpan={4} className="group group-start">Principal settings</th>
                     <th colSpan={result.actual_months.length} className="group group-start">Actual sales</th>
                     <th colSpan={result.forecast_months.length} className="group group-start">Sales forecast</th>
                     <th colSpan={3} className="group group-start">Stock</th>
-                    <th colSpan={result.plan_months.length} className="group group-start">Order demand forecast</th>
+                    <th colSpan={result.plan_months.length} className="group group-start">
+                      {MODE_LABEL[mode]}
+                    </th>
                     <th rowSpan={2} className="num group-start">Total</th>
                     <th rowSpan={2}>Status</th>
                   </tr>
@@ -264,6 +265,7 @@ function PlanView({ runId }: { runId: number }) {
                     <th className="num group-start">MOQ</th>
                     <th className="num">Holding</th>
                     <th className="num">Lead time</th>
+                    <th className="num">Order cycle</th>
                     {[...result.actual_months, ...result.forecast_months].map((m, i) => (
                       <th
                         key={`${i < result.actual_months.length ? 'a' : 'f'}-${m}`}
@@ -284,7 +286,7 @@ function PlanView({ runId }: { runId: number }) {
                 </thead>
                 <tbody>
                   {rows.map((s) => {
-                    const total = monthlyTotal(s)
+                    const view = skuView(s, mode)
                     return (
                       <tr
                         key={s.sap_code}
@@ -297,6 +299,7 @@ function PlanView({ runId }: { runId: number }) {
                         <td className="num group-start">{fmtQty(s.moq)}</td>
                         <td className="num">{s.holding_months === null ? '—' : `${fmtMonths(s.holding_months)} mo`}</td>
                         <td className="num">{s.lead_time_days === null ? '—' : `${s.lead_time_days} days`}</td>
+                        <td className="num">{s.order_cycle_months === null ? '—' : `${s.order_cycle_months} mo`}</td>
                         {demandColumns(s, result.actual_months, result.forecast_months).map((d, i) => (
                           <td
                             key={i}
@@ -309,12 +312,12 @@ function PlanView({ runId }: { runId: number }) {
                         <td className="num group-start">{s.buffer === null ? '—' : fmtQty(s.buffer)}</td>
                         <td className="num">{fmtQty(s.available)}</td>
                         <td className="num">{s.target === null ? '—' : fmtQty(s.target)}</td>
-                        {(s.monthly ?? []).map((m, i) => (
-                          <OrderCell key={m.month} qty={m.order} moqApplied={m.moq_applied} groupStart={i === 0} />
+                        {(view.months ?? []).map((m, i) => (
+                          <MonthCell key={m.month} month={m} groupStart={i === 0} />
                         ))}
-                        <td className="num group-start">{total === null ? '—' : fmtQty(total)}</td>
+                        <td className="num group-start">{view.total === null ? '—' : fmtQty(view.total)}</td>
                         <td>
-                          <StatusChip status={s.status} zeroForecast={s.zero_forecast} />
+                          <StatusChip status={view.status} zeroForecast={s.zero_forecast} />
                         </td>
                       </tr>
                     )
@@ -334,24 +337,44 @@ function PlanView({ runId }: { runId: number }) {
                 </tbody>
               </table>
               <p className="muted">
-                Buffer is the average of the sales months above zero (greyed months are skipped). Each month&apos;s
-                order brings stock (sellable plus SIT) back up to buffer × holding. Click a row to see the arithmetic.
+                Buffer is the average of the sales months above zero (greyed months are skipped).{' '}
+                {mode === 'plan'
+                  ? 'Each principal is ordered from once every order cycle: an order month brings stock (sellable plus SIT) up to buffer × (holding + order cycle − 1), and · marks the months between orders.'
+                  : "Each month's order brings stock (sellable plus SIT) back up to buffer × holding."}{' '}
+                Click a row to see the arithmetic.
               </p>
             </>
           ) : (
-            <p className="muted">Recalculate to see the 12-month plan.</p>
+            <p className="muted">
+              {hasMonthly(result) ? 'Recalculate to see the order plan.' : 'Recalculate to see the 12-month plan.'}
+            </p>
           )}
         </div>
         {selectedSku && (
           <SkuDetail
             sku={selectedSku}
             planDate={result.plan_date}
+            mode={mode}
             warnings={selectedWarnings}
             onClose={() => setSelected(null)}
           />
         )}
       </div>
     </div>
+  )
+}
+
+/** One month's order: "—" when no order is calculated, a muted dot between order months, else the order. */
+function MonthCell({ month, groupStart }: { month: MonthPlan; groupStart: boolean }) {
+  const kind = orderCell(month)
+  if (kind === 'order') return <OrderCell qty={month.order} moqApplied={month.moq_applied} groupStart={groupStart} />
+  return (
+    <td
+      className={`num${groupStart ? ' group-start' : ''}${kind === 'not-order-month' ? ' not-order' : ''}`}
+      title={kind === 'not-order-month' ? 'Not an order month' : undefined}
+    >
+      {kind === 'blocked' ? '—' : '·'}
+    </td>
   )
 }
 
