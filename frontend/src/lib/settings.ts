@@ -1,4 +1,5 @@
-import type { SupplierSettings, SupplierSettingView } from '../types'
+import { fmtMonths, fmtQty } from './format'
+import type { SettingField, SupplierSettings, SupplierSettingView } from '../types'
 
 export const HOLDING_MIN = 0.5
 export const HOLDING_MAX = 24
@@ -28,11 +29,22 @@ export function validateHolding(text: string): Parsed {
   return { value, error: null }
 }
 
+// Whole number, either plain ("8000") or with correctly grouped thousands ("8,000"), so a typo like "8,00" is an error.
+const MOQ_TEXT = /^(\d+|\d{1,3}(,\d{3})+)$/
+
 /** Parses one MOQ input: a whole number of cartons, 0 or more. Thousands separators ("8,000") are allowed; blank is not. */
 export function validateMoq(text: string): Parsed {
-  const digits = text.replace(/[,\s]/g, '')
-  if (!WHOLE.test(digits)) return { value: null, error: MOQ_ERROR }
-  return { value: Number(digits), error: null }
+  const trimmed = text.trim()
+  if (!MOQ_TEXT.test(trimmed)) return { value: null, error: MOQ_ERROR }
+  return { value: Number(trimmed.replace(/,/g, '')), error: null }
+}
+
+/** One change-log value: holding in months ("not set" when blank), MOQ in cartons, lead time in days ("blank"). */
+export function logValue(field: SettingField, value: number | null): string {
+  if (value === null) return field === 'holding_months' ? 'not set' : 'blank'
+  if (field === 'moq') return fmtQty(value)
+  if (field === 'lead_time_days') return `${value} days`
+  return fmtMonths(value)
 }
 
 /** Parses one lead-time input: whole days from 0 to 365. Blank means "not set" (null, no error). */

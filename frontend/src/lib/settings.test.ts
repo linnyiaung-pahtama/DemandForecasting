@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { changedSettings, validateHolding, validateLeadTime, validateMoq } from './settings'
+import { changedSettings, logValue, validateHolding, validateLeadTime, validateMoq } from './settings'
 import type { SupplierSettingView } from '../types'
 
 const HOLDING_ERROR = 'Holding must be a number from 0.5 to 24 months, or blank.'
@@ -35,7 +35,7 @@ describe('validateMoq', () => {
   })
 
   it('rejects blank, negative, fractional and non-numeric text', () => {
-    for (const text of ['', '  ', '-1', '1.5', 'abc', '1e3']) {
+    for (const text of ['', '  ', '-1', '1.5', 'abc', '1e3', '8,00', '1 0 0', '80,00,0', ',800']) {
       expect(validateMoq(text)).toEqual({ value: null, error: MOQ_ERROR })
     }
   })
@@ -82,5 +82,17 @@ describe('changedSettings', () => {
   it('skips suppliers that are not in the edited set and ignores unknown ones', () => {
     const edited = { Z: { holding_months: 5, moq: 0, lead_time_days: null } }
     expect(changedSettings([view('A', null)], edited)).toEqual([])
+  })
+})
+
+describe('logValue', () => {
+  it('formats each setting the way the change log shows it', () => {
+    expect(logValue('lead_time_days', 14)).toBe('14 days')
+    expect(logValue('lead_time_days', null)).toBe('blank')
+    expect(logValue('moq', 0)).toBe('0')
+    expect(logValue('moq', 8000)).toBe('8,000')
+    expect(logValue('holding_months', null)).toBe('not set')
+    expect(logValue('holding_months', 2)).toBe('2')
+    expect(logValue('holding_months', 1.5)).toBe('1.5')
   })
 })

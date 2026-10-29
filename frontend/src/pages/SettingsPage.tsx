@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { errorText, getSettings, getSettingsLog, listRuns, recalculate, saveSettings } from '../api'
-import { fmtDate, fmtMonths, fmtQty, fmtTime } from '../lib/format'
+import { fmtDate, fmtMonths, fmtTime } from '../lib/format'
 import {
   changedSettings,
+  logValue,
   validateHolding,
   validateLeadTime,
   validateMoq,
@@ -42,13 +43,6 @@ function toDrafts(rows: SupplierSettingView[]): Record<string, Draft> {
 }
 
 const FIELD_LABEL: Record<SettingField, string> = { holding_months: 'Holding', moq: 'MOQ', lead_time_days: 'Lead time' }
-
-function logValue(field: SettingField, value: number | null): string {
-  if (value === null) return field === 'holding_months' ? 'not set' : 'blank'
-  if (field === 'moq') return fmtQty(value)
-  if (field === 'lead_time_days') return ` days`
-  return fmtMonths(value)
-}
 
 const EMPTY: Draft = { holding: '', moq: '', lead: '' }
 
