@@ -1,28 +1,60 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { errorText, getSettings, getSettingsLog, listRuns, recalculate, saveSettings } from '../api'
-import { fmtDate, fmtMonths, fmtTime } from '../lib/format'
-import { changedHoldings, validateHolding } from '../lib/settings'
-import type { SettingsLogEntry, SupplierSettingView } from '../types'
+import { fmtDate, fmtMonths, fmtQty, fmtTime } from '../lib/format'
+import {
+  changedSettings,
+  validateHolding,
+  validateLeadTime,
+  validateMoq,
+  type EditedSettings,
+  type Parsed,
+} from '../lib/settings'
+import type { SettingField, SettingsLogEntry, SupplierSettingView } from '../types'
 
 interface Saved {
   runId: number
   file: string
 }
 
-function toDrafts(rows: SupplierSettingView[]): Record<string, string> {
-  const drafts: Record<string, string> = {}
-  for (const r of rows) drafts[r.supplier] = r.holding_months === null ? '' : fmtMonths(r.holding_months)
+interface Draft {
+  holding: string
+  moq: string
+  lead: string
+}
+
+interface Checks {
+  holding: Parsed
+  moq: Parsed
+  lead: Parsed
+}
+
+function toDrafts(rows: SupplierSettingView[]): Record<string, Draft> {
+  const drafts: Record<string, Draft> = {}
+  for (const r of rows) {
+    drafts[r.supplier] = {
+      holding: r.holding_months === null ? '' : fmtMonths(r.holding_months),
+      moq: String(r.moq),
+      lead: r.lead_time_days === null ? '' : String(r.lead_time_days),
+    }
+  }
   return drafts
 }
 
-function holdingText(value: number | null): string {
-  return value === null ? 'not set' : fmtMonths(value)
+const FIELD_LABEL: Record<SettingField, string> = { holding_months: 'Holding', moq: 'MOQ', lead_time_days: 'Lead time' }
+
+function logValue(field: SettingField, value: number | null): string {
+  if (value === null) return field === 'holding_months' ? 'not set' : 'blank'
+  if (field === 'moq') return fmtQty(value)
+  if (field === 'lead_time_days') return ` days`
+  return fmtMonths(value)
 }
+
+const EMPTY: Draft = { holding: '', moq: '', lead: '' }
 
 export default function SettingsPage() {
   const [rows, setRows] = useState<SupplierSettingView[] | null>(null)
-  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -55,24 +87,29 @@ export default function SettingsPage() {
 
   // Drafts stay as text so a half-typed value like "1." is not rewritten under the cursor.
   const checks = useMemo(() => {
-    const out: Record<string, ReturnType<typeof validateHolding>> = {}
-    for (const r of rows ?? []) out[r.supplier] = validateHolding(drafts[r.supplier] ?? '')
+    const out: Record<string, Checks> = {}
+    for (const r of rows ?? []) {
+      const d = drafts[r.supplier] ?? EMPTY
+      out[r.supplier] = { holding: validateHolding(d.holding), moq: validateMoq(d.moq), lead: validateLeadTime(d.lead) }
+    }
     return out
   }, [rows, drafts])
 
-  const hasErrors = Object.values(checks).some((c) => c.error !== null)
+  const hasErrors = Object.values(checks).some((c) => c.holding.error || c.moq.error || c.lead.error)
 
   const changes = useMemo(() => {
-    const edited: Record<string, number | null> = {}
+    const edited: Record<string, EditedSettings> = {}
     for (const r of rows ?? []) {
-      const check = checks[r.supplier]
-      if (check && check.error === null) edited[r.supplier] = check.value
+      const c = checks[r.supplier]
+      if (c && !c.holding.error && !c.moq.error && !c.lead.error && c.moq.value !== null) {
+        edited[r.supplier] = { holding_months: c.holding.value, moq: c.moq.value, lead_time_days: c.lead.value }
+      }
     }
-    return changedHoldings(rows ?? [], edited)
+    return changedSettings(rows ?? [], edited)
   }, [rows, checks])
 
-  function edit(supplier: string, value: string) {
-    setDrafts((prev) => ({ ...prev, [supplier]: value }))
+  function edit(supplier: string, field: keyof Draft, value: string) {
+    setDrafts((prev) => ({ ...prev, [supplier]: { ...(prev[supplier] ?? EMPTY), [field]: value } }))
     setSaved(null)
   }
 
@@ -126,7 +163,8 @@ export default function SettingsPage() {
       <h2>Supplier settings</h2>
       <p className="muted">
         Holding is how many months of stock to keep for each supplier. Order = average monthly demand × holding −
-        (sellable + SIT). Lead time does not change the order quantity.
+        (sellable + SIT). An order above 0 but below the supplier's MOQ is raised to the MOQ; the MOQ applies to each
+        SKU of the supplier on its own (0 = no minimum). Lead time only sets the next calculation date.
       </p>
 
       {loadError && (
@@ -149,37 +187,64 @@ export default function SettingsPage() {
                 <tr>
                   <th>Supplier</th>
                   <th className="num">SKUs</th>
-                  <th className="num">Max lead time (days)</th>
                   <th>Holding (months)</th>
+                  <th>MOQ (cartons)</th>
+                  <th>Lead time (days)</th>
                   <th>Notes</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => {
-                  const error = checks[r.supplier]?.error ?? null
+                  const c = checks[r.supplier]
+                  const d = drafts[r.supplier] ?? EMPTY
+                  const errors = c ? [c.holding.error, c.moq.error, c.lead.error].filter((e): e is string => e !== null) : []
                   return (
                     <tr key={r.supplier} className={r.holding_months === null ? 'default-row' : undefined}>
                       <td>{r.supplier}</td>
                       <td className="num">{r.sku_count}</td>
-                      <td className="num">{r.max_lead_time_days ?? '–'}</td>
                       <td>
                         <input
                           type="text"
                           inputMode="decimal"
                           aria-label={`Holding months for ${r.supplier}`}
-                          aria-invalid={error !== null}
-                          value={drafts[r.supplier] ?? ''}
-                          onChange={(e) => edit(r.supplier, e.target.value)}
+                          aria-invalid={Boolean(c?.holding.error)}
+                          value={d.holding}
+                          onChange={(e) => edit(r.supplier, 'holding', e.target.value)}
                           style={{ width: '5.5rem' }}
                         />
                       </td>
                       <td>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          aria-label={`MOQ for ${r.supplier}`}
+                          aria-invalid={Boolean(c?.moq.error)}
+                          value={d.moq}
+                          onChange={(e) => edit(r.supplier, 'moq', e.target.value)}
+                          style={{ width: '6.5rem' }}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          aria-label={`Lead time days for ${r.supplier}`}
+                          aria-invalid={Boolean(c?.lead.error)}
+                          value={d.lead}
+                          onChange={(e) => edit(r.supplier, 'lead', e.target.value)}
+                          style={{ width: '4.5rem' }}
+                        />
+                      </td>
+                      <td>
                         {r.holding_months === null && <div className="note-default">Holding not set — SKUs blocked</div>}
-                        {error && (
-                          <div className="field-error" role="alert">
-                            {error}
-                          </div>
+                        {r.lead_time_days === null && (
+                          <div className="muted">Lead time not set — no next calculation date</div>
                         )}
+                        {errors.map((e) => (
+                          <div key={e} className="field-error" role="alert">
+                            {e}
+                          </div>
+                        ))}
                       </td>
                     </tr>
                   )
@@ -222,7 +287,7 @@ export default function SettingsPage() {
       {!log ? (
         !logError && <p className="muted">Loading change log…</p>
       ) : log.length === 0 ? (
-        <p className="muted">No holding changes yet.</p>
+        <p className="muted">No setting changes yet.</p>
       ) : (
         <div className="table-wrap">
           <table>
@@ -230,6 +295,7 @@ export default function SettingsPage() {
               <tr>
                 <th>When</th>
                 <th>Supplier</th>
+                <th>Setting</th>
                 <th className="num">From</th>
                 <th className="num">To</th>
               </tr>
@@ -241,8 +307,9 @@ export default function SettingsPage() {
                     {fmtDate(e.changed_at)} {fmtTime(e.changed_at)}
                   </td>
                   <td>{e.supplier}</td>
-                  <td className="num">{holdingText(e.old_value)}</td>
-                  <td className="num">{holdingText(e.new_value)}</td>
+                  <td>{FIELD_LABEL[e.field]}</td>
+                  <td className="num">{logValue(e.field, e.old_value)}</td>
+                  <td className="num">{logValue(e.field, e.new_value)}</td>
                 </tr>
               ))}
             </tbody>

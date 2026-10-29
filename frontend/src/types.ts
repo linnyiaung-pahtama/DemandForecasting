@@ -117,14 +117,19 @@ export interface SkuResult {
   zero_forecast: boolean
 }
 
-export interface SupplierHolding {
+export interface SupplierSettings {
   supplier: string
   holding_months: number | null
+  moq: number | null // null only in runs saved before MOQ moved to supplier settings
+  lead_time_days: number | null
 }
+
+export type SettingField = 'holding_months' | 'moq' | 'lead_time_days'
 
 export interface SettingsLogEntry {
   id: number
   supplier: string
+  field: SettingField
   old_value: number | null
   new_value: number | null
   changed_at: string
@@ -135,7 +140,7 @@ export interface HoldingPlan {
   actual_months: string[]
   forecast_months: string[] // the 3 used
   skus: SkuResult[]
-  settings_used: SupplierHolding[]
+  settings_used: SupplierSettings[]
   blocked_suppliers: string[]
   counts: Record<string, number> // TO_ORDER, NO_ORDER_NEEDED, HOLDING_NOT_SET, NO_DEMAND_DATA, ZERO_FORECAST
 }
@@ -167,12 +172,14 @@ export interface SupplierSummary {
   blocked_skus: number
   no_demand_skus: number
   zero_forecast_skus: number
-  max_lead_time_days: number | null
+  moq: number | null // from the plan's settings; null for runs saved before supplier MOQ/lead time
+  lead_time_days: number | null
 }
 
 export interface SupplierSettingView {
   supplier: string
   holding_months: number | null
+  moq: number
+  lead_time_days: number | null
   sku_count: number
-  max_lead_time_days: number | null
 }

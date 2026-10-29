@@ -3,7 +3,7 @@ import type {
   RunListItem,
   RunRecord,
   SettingsLogEntry,
-  SupplierHolding,
+  SupplierSettings,
   SupplierSettingView,
   SupplierSummary,
 } from './types'
@@ -114,7 +114,7 @@ export function getSettings(): Promise<SupplierSettingView[]> {
   return request<SupplierSettingView[]>('/api/settings')
 }
 
-export function saveSettings(items: SupplierHolding[]): Promise<SupplierSettingView[]> {
+export function saveSettings(items: SupplierSettings[]): Promise<SupplierSettingView[]> {
   return request<SupplierSettingView[]>('/api/settings', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
