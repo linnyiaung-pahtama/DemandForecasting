@@ -73,9 +73,9 @@ def plan_sku(sku: SkuInput, actuals: dict[str, float], actual_months: list[str],
 def plan_date_bounds(parsed: ParsedInput) -> tuple[date, date]:
     """Earliest and latest allowed plan date.
 
-    Stock is as of the MTD end, so the plan starts the day after it and no later than the end of
-    the MTD month (a later start would drop the demand in between). If the MTD ends on the last
-    day of its month, the next day is the only allowed date.
+    The sales month-to-date ends on the MTD end, so the plan starts the day after it and no later
+    than the end of the MTD month (a later start would drop the demand in between). If the MTD ends
+    on the last day of its month, the next day is the only allowed date.
     """
     earliest = parsed.mtd_end + timedelta(days=1)
     year, mon = parsed.mtd_end.year, parsed.mtd_end.month

@@ -163,6 +163,12 @@ def test_latest_run_id_empty(tmp_path):
 
 def test_v2_database_is_migrated_in_place(tmp_path):
     parsed, actual, result = _build_run()
+    # a v2 run kept its stock in the Data sheet, so its SKU carries real sellable and SIT figures
+    parsed = parsed.model_copy(update={"skus": [parsed.skus[0].model_copy(update={"sellable": 7.0, "sit": 3.0})]})
+    result = result.model_copy(update={"skus": [plan_sku(
+        parsed.skus[0], actual.cartons.get("1", {}), actual.months, parsed.forecast_months[:3], 3,
+        parsed.default_plan_date)]})
+    assert result.skus[0].sellable == 7 and result.skus[0].sit == 3
     db = tmp_path / "v2.db"
     with closing(sqlite3.connect(db)) as c:
         c.executescript(V2_SCHEMA)
@@ -192,3 +198,5 @@ def test_v2_database_is_migrated_in_place(tmp_path):
         assert [r[1] for r in c.execute("PRAGMA table_info(runs)")] == columns
     rec = TestClient(create_app(db)).post("/api/runs/1/recalculate")
     assert rec.status_code == 200 and rec.json()["stock"] is None
+    sku = rec.json()["result"]["skus"][0]
+    assert (sku["sellable"], sku["sit"], sku["available"]) == (7, 3, 10) and sku["pg_sellable"] is None

@@ -28,3 +28,10 @@ export function groupWarnings(
     perSku: all.filter((x) => x.warning.sap_code !== null),
   }
 }
+
+/** The stock-report warnings that apply to a whole file (not one SKU): the upload page shows them in an alert. */
+export function stockFileWarnings(warnings: ParseWarning[]): ParseWarning[] {
+  return warnings.filter(
+    (w) => w.sap_code === null && (w.message.startsWith('PG Expiry Check') || w.message.startsWith('PDG Stock List')),
+  )
+}

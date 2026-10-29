@@ -205,9 +205,9 @@ def test_forecast_entirely_before_the_window_is_rejected():
 def test_negative_stock_warns():
     p = parse_input(make_workbook([["1001", "Honesty", "X", 12, 0, 6, 14, -20, 0, -3, 5] + [10] * 12]))
     assert p.skus[0].sit == -3
-    msgs = {w.column: w.message for w in p.warnings if "negative stock" in w.message}
-    assert msgs == {"SIT Ctns (pending order)": "negative stock — check the stock report"}
-    assert all(w.sap_code == "1001" for w in p.warnings if "negative stock" in w.message)
+    msgs = {w.column: w.message for w in p.warnings if "negative" in w.message}
+    assert msgs == {"SIT Ctns (pending order)": "negative SIT — check the Data sheet"}
+    assert all(w.sap_code == "1001" for w in p.warnings if "negative" in w.message)
 
 
 def test_v1_only_warnings_say_they_are_not_used():

@@ -268,7 +268,7 @@ def parse_input(data: bytes) -> ParsedInput:
         sit = num(c_sit, h_sit)
         if sit < 0:
             warnings.append(ParseWarning(sap_code=sap, column=h_sit,
-                                         message="negative stock — check the stock report"))
+                                         message="negative SIT — check the Data sheet"))
 
         skus.append(SkuInput(
             sap_code=sap,
@@ -278,7 +278,7 @@ def parse_input(data: bytes) -> ParsedInput:
             moq=num(c_moq, h_moq),
             shelf_life_months=shelf,
             lead_time_days=lead,
-            sellable=0.0,
+            sellable=0.0,  # stock is filled in only by stock.apply_stock; callers must apply the stock reports
             non_sellable=0.0,
             sit=sit,
             mtd_sales=mtd,

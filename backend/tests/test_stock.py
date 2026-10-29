@@ -48,15 +48,21 @@ def test_unknown_flag_values_count_as_non_sellable_with_one_warning_per_value():
 
 def test_unreadable_quantities_are_skipped_with_codes_recorded():
     r = parse_pdg(make_pdg_workbook([["1", "x", "L", None, 0, 5, None], ["2", "x", "L", None, 12, "n/a", None],
-                                     ["3", "x", "L", None, 12, 24, None]]))
-    assert [l.code for l in r.lines] == ["3"] and r.skipped_codes == ["1", "2"]
-    assert r.warnings[0].message == "PDG Stock List: 2 rows have no readable Bin_Qty or U_Ratio; skipped"
+                                     ["3", "x", "L", None, 12, 24, None], ["4", "x", "L", None, -12, 12, None]]))
+    assert [l.code for l in r.lines] == ["3"] and r.skipped_codes == ["1", "2", "4"]
+    assert r.warnings[0].message == "PDG Stock List: 3 rows have no readable Bin_Qty or U_Ratio; skipped"
 
 
 def test_pg_as_of_is_most_common_expiry_minus_days_left():
     rows = [["A", "W", "Sellable", 1, 1, 1, datetime(2027, 1, 1), 81], ["A", "W", "Sellable", 1, 1, 1, datetime(2027, 1, 2), 82],
             ["A", "W", "Sellable", 1, 1, 1, datetime(2027, 1, 1), 1], ["A", "W", "Sellable", 1, 1, 1, " ", None]]
     assert parse_pg(make_pg_workbook(rows)).as_of == date(2026, 10, 12)
+
+
+def test_pg_as_of_skips_rows_with_an_absurd_day_left():
+    rows = [["A", "W", "Sellable", 1, 1, 1, datetime(2027, 1, 1), 10 ** 7], ["A", "W", "Sellable", 1, 1, 1, datetime(2027, 1, 1), 81]]
+    r = parse_pg(make_pg_workbook(rows))
+    assert len(r.lines) == 2 and r.as_of == date(2026, 10, 12)
 
 
 def test_hidden_rows_still_count_with_warning():

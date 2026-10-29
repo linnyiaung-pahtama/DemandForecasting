@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { groupWarnings } from './warnings'
+import { groupWarnings, stockFileWarnings } from './warnings'
 import type { ParseWarning } from '../types'
 
 const w = (sap_code: string | null, message: string, column: string | null = null): ParseWarning => ({
@@ -48,5 +48,21 @@ describe('groupWarnings', () => {
 
   it('returns empty groups when there are no warnings', () => {
     expect(groupWarnings([], [])).toEqual({ fileLevel: [], perSku: [] })
+  })
+})
+
+describe('stockFileWarnings', () => {
+  it('keeps only the file-level warnings that start with a stock report name', () => {
+    const list = [
+      w(null, 'Stock columns in the Data sheet are ignored'),
+      w(null, 'PG Expiry Check has no stock for any SKU in the Data sheet — check that it is the right report'),
+      w('A1', 'PDG Stock List: a stock row for this SKU could not be read and was skipped'),
+      w(null, 'PDG Stock List was printed on 2 Oct 2026, 10 days before the plan date'),
+      w(null, 'No sales rows for Aug 2026'),
+    ]
+    expect(stockFileWarnings(list).map((x) => x.message)).toEqual([
+      'PG Expiry Check has no stock for any SKU in the Data sheet — check that it is the right report',
+      'PDG Stock List was printed on 2 Oct 2026, 10 days before the plan date',
+    ])
   })
 })

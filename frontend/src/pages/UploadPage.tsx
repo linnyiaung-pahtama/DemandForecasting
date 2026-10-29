@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createRun, errorText, inspectFiles } from '../api'
 import { fmtDate, fmtQty, monthLabel } from '../lib/format'
+import { stockFileWarnings } from '../lib/warnings'
 import type { InspectResponse } from '../types'
 
 function monthRange(months: string[]): string {
@@ -65,6 +66,8 @@ export default function UploadPage() {
       setCalculating(false)
     }
   }
+
+  const stockAlerts = info ? stockFileWarnings(info.warnings) : []
 
   return (
     <div className="stack">
@@ -154,14 +157,14 @@ export default function UploadPage() {
               <dt>PG sellable</dt>
               <dd>
                 {fmtQty(info.stock.pg.sellable_cartons)} cartons
-                {info.stock.pg.as_of && ` · as of ${fmtDate(info.stock.pg.as_of)}`}
+                {info.stock.pg.as_of ? ` · as of ${fmtDate(info.stock.pg.as_of)}` : ' · date not found'}
               </dd>
             </div>
             <div>
               <dt>PDG sellable</dt>
               <dd>
                 {fmtQty(info.stock.pdg.sellable_cartons)} cartons
-                {info.stock.pdg.as_of && ` · printed ${fmtDate(info.stock.pdg.as_of)}`}
+                {info.stock.pdg.as_of ? ` · printed ${fmtDate(info.stock.pdg.as_of)}` : ' · date not found'}
               </dd>
             </div>
           </dl>
@@ -184,10 +187,20 @@ export default function UploadPage() {
               {fmtDate(info.max_plan_date)}.
             </span>
             <span className="muted">
-              Stock figures are as of {fmtDate(info.mtd_end)}; the plan date can be up to the end of that
+              Sales month-to-date ends on {fmtDate(info.mtd_end)}; the plan date can be up to the end of that
               month.
             </span>
           </div>
+
+          {stockAlerts.length > 0 && (
+            <div className="alert warn" role="status">
+              <ul className="flag-messages">
+                {stockAlerts.map((w, i) => (
+                  <li key={i}>{w.message}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <details className="warnings">
             <summary>

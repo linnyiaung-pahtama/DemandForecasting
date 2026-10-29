@@ -106,7 +106,7 @@ def _parse(data: bytes, source: StockSource, name: str, required: list[str], mis
             sellable = flag == "sellable"
         else:
             bin_qty, ratio = _to_number(cell(col["Bin_Qty"])), _to_number(cell(col["U_Ratio"]))
-            cartons = bin_qty / ratio if bin_qty is not None and ratio else None
+            cartons = bin_qty / ratio if bin_qty is not None and ratio is not None and ratio > 0 else None
             flag_cell = cell(col["Sell or Non"])
             flag = _norm(flag_cell)
             known = flag in ("", "non")
@@ -155,8 +155,12 @@ def _pg_as_of(rows: list[tuple], columns: dict[str, int]) -> date | None:
     for row in rows:
         expiry = _date_part(row[c_exp]) if c_exp < len(row) else None
         left = row[c_left] if c_left < len(row) else None
-        if expiry is not None and _is_number(left):
+        if expiry is None or not _is_number(left):
+            continue
+        try:
             counts[expiry - timedelta(days=left)] += 1
+        except (OverflowError, ValueError):  # an absurd Day Left only costs that row's vote on the report date
+            continue
     return max(counts, key=lambda d: (counts[d], d)) if counts else None
 
 

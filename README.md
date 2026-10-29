@@ -46,12 +46,12 @@ Terminal 2, frontend (port 5173):
 npm --prefix frontend run dev
 ```
 
-Then open http://localhost:5173. The frontend forwards `/api` requests to the backend, so both must be running. `.claude/launch.json` holds the same two commands for Claude Code's preview.
+Then open http://localhost:5173. The frontend forwards `/api` requests to the backend, so both must be running. `.claude/launch.json` holds these two commands for Claude Code's preview, plus two test entries (`backend-test` and `frontend-test`, see the end of this file).
 
 ## Using it
 
 1. **New plan**: choose the four files (the Data file, the sales export, the PG Expiry Check and the PDG Stock List), check the detected months, the stock facts (SKUs with stock, sellable cartons from PG and from PDG, the PDG printed date and the PG as-of date), the plan date and any warnings, then click Calculate. Calculate is enabled once all four files inspect OK.
-2. **Order plan**: count cards (To order, Holding not set, No demand data, Zero forecast), a banner listing blocked suppliers, and filters for supplier, status, the Zero forecast flag and search. A warnings panel above the table shows file-level warnings (labelled Data file, Sales export, PG Expiry Check or PDG Stock List) in full and counts the per-SKU warnings in a collapsible list. The plan header lists the four file names. Click a SKU to see its six demand values, its stock (available = PG sellable + PDG sellable + SIT, with non-sellable PG / PDG shown for information) and the arithmetic behind its order. The supplier summary is reached from this page.
+2. **Order plan**: count cards (To order, Holding not set, No demand data, Zero forecast), a banner listing blocked suppliers, and filters for supplier, status, the Zero forecast flag and search. A warnings panel above the table shows file-level warnings (labelled Data file, Sales export or Stock files; the stock report's name is in the message text) in full and counts the per-SKU warnings in a collapsible list. The plan header lists the four file names. Click a SKU to see its six demand values, its stock (available = PG sellable + PDG sellable + SIT, with non-sellable PG / PDG shown for information) and the arithmetic behind its order. The supplier summary is reached from this page.
 3. **Supplier summary**: per supplier, the holding, SKU counts, total order cartons and blocked / no-demand SKUs. Expand a supplier for the list of SKUs to put on one purchase order.
 4. **Supplier settings**: one Holding (months) per supplier, plus the change log (the newest 200 entries, newest first). Saving recalculates the latest run.
 5. **History**: reopen a past run exactly as it was calculated. Each run lists its file names (runs saved before the stock uploads show "—" for the two stock files).
@@ -131,12 +131,13 @@ For each SKU in the Data file:
 A stock file is rejected (error shown under "PG Expiry Check: " or "PDG Stock List: ") if it is not a readable `.xlsx`, if no sheet has the required headers, or if the sheet has no data rows under the header. Otherwise these are warned about and the run continues:
 
 - **Unknown flag value**, one warning per distinct value: "PG Expiry Check: 3 rows have Location 'Quarantine' (not Sellable or Non-Sellable); counted as non-sellable". For PDG it is "PDG Stock List: N rows have Sell or Non 'X' (not blank or Non); counted as non-sellable". Unknown stock counts as non-sellable, so it never reduces an order.
-- **Unreadable quantity**, one warning per file: "PG Expiry Check: N rows have no readable Ctn; skipped" (for PDG: "no readable Bin_Qty or U_Ratio", which also covers a missing or 0 `U_Ratio`). A SKU in the Data file that lost a row also gets its own warning.
+- **Unreadable quantity**, one warning per file: "PG Expiry Check: N rows have no readable Ctn; skipped" (for PDG: "no readable Bin_Qty or U_Ratio", which also covers a missing, 0 or negative `U_Ratio`). A SKU in the Data file that lost a row also gets its own warning.
 - **Codes not in the Data file**, one warning per file: "PDG Stock List: 8 stock codes are not in the Data sheet; ignored".
 - **No matching SKUs**: "PG Expiry Check has no stock for any SKU in the Data sheet — check that it is the right report". A warning, not a rejection, because a principal group can legitimately have no stock.
 - **Hidden rows**: "PG Expiry Check: N rows are hidden by a filter; they are still counted".
 - **Old stock date**: if the PDG printed date or the PG as-of date is more than 3 days from the plan date: "PDG Stock List was printed on 2 Oct 2026, 10 days before the plan date" (PG: "PG Expiry Check is as of ..."). It is checked again when the run is created, using the plan date you chose.
 - **Negative total**: "negative stock — check the stock report" on a SKU whose total sellable stock is below 0.
+- **Negative SIT**: "negative SIT — check the Data sheet" on a SKU whose `SIT Ctns (pending order)` in the Data sheet is below 0. SIT is the only stock figure that still comes from the Data sheet.
 
 ## How the order is calculated
 
@@ -195,7 +196,7 @@ $env:ORDERPLAN_DB = "C:\path\to\other.db"      # PowerShell
 export ORDERPLAN_DB=C:/path/to/other.db         # Git Bash
 ```
 
-The `$env:` setting applies only to the current PowerShell window. The `backend` and `frontend` entries in `.claude/launch.json` always use the default database. The `backend-test` entry (port 8001, with `frontend-test` on port 5174 pointing at it) uses its own scratch database through `ORDERPLAN_DB`, for trying things without touching real runs; edit the path in `.claude/launch.json` for your machine.
+The `$env:` setting applies only to the current PowerShell window. The `backend` and `frontend` entries in `.claude/launch.json` always use the default database. The `backend-test` entry (port 8001, with `frontend-test` on port 5174 pointing at it) uses its own scratch database, `backend/data/orderplan-test.db` (set through `ORDERPLAN_DB`; the file is created on first use and `backend/data/` is git-ignored), for trying things without touching real runs.
 
 **Upgrading from v1.** If the database file is a v1 one (it has reorder/target days), the tool renames it to `orderplan.v1-backup.db` in the same folder (`orderplan.v1-backup-1.db`, `-2` and so on if that name is taken) and creates a fresh v2 database. Nothing is deleted. v1 runs and settings are not carried over.
 
