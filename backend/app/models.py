@@ -235,6 +235,13 @@ class SupplierSummary(BaseModel):
     lead_time_days: int | None
     monthly_order_qty: list[int] | None = None  # per plan month; None for runs saved before the 12-month plan
     twelve_month_total: int | None = None
+    # The order plan's figures. None for runs saved before the order cycle setting; the monthly totals are
+    # also None for a principal whose holding is not set, and None in months that are not order months.
+    order_cycle_months: int | None = None
+    plan_skus_to_order: int | None = None
+    plan_total_order_qty: int | None = None
+    plan_monthly_order_qty: list[int | None] | None = None
+    plan_twelve_month_total: int | None = None
 
 
 class SupplierSettingView(BaseModel):

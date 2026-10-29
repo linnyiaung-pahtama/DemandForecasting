@@ -65,6 +65,45 @@ def test_supplier_monthly_totals():
     assert blocked.monthly_order_qty is None and blocked.twelve_month_total is None
 
 
+def _cycle_three_cfc():
+    parsed = _parsed_with_stock()
+    actual = actual_cartons(parse_sales((FIX / "sales_export.xlsx").read_bytes()), parsed)
+    return plan_all(parsed, actual, holding_settings({"CFC": 3}, moq=0, lead=7, cycle=3), date(2026, 10, 12))
+
+
+def test_summary_order_plan_this_month():
+    result = _cycle_three_cfc()
+    summary = {s.supplier: s for s in summarize_suppliers(result)}
+    cfc, cfc_skus = summary["CFC"], [s for s in result.skus if s.supplier == "CFC"]
+    assert cfc.order_cycle_months == 3
+    assert cfc.plan_total_order_qty == sum(s.plan_order_qty for s in cfc_skus)
+    assert cfc.plan_skus_to_order == sum(1 for s in cfc_skus if s.plan_order_qty > 0)
+    assert cfc.plan_total_order_qty > cfc.total_order_qty   # three months' cover instead of one
+    months = cfc.plan_monthly_order_qty
+    assert [m is not None for m in months] == [True, False, False] * 4
+    assert months[0] == cfc.plan_total_order_qty
+    assert months[3] == sum(s.order_plan[3].order for s in cfc_skus)
+    assert cfc.plan_twelve_month_total == sum(m for m in months if m is not None)
+
+
+def test_summary_order_plan_blank_for_blocked():
+    blocked = next(s for s in summarize_suppliers(_cycle_three_cfc()) if s.supplier != "CFC")
+    assert blocked.plan_monthly_order_qty is None and blocked.plan_twelve_month_total is None
+    assert (blocked.plan_skus_to_order, blocked.plan_total_order_qty) == (0, 0)   # like the forecast's 0 / 0
+    assert blocked.order_cycle_months == 1
+
+
+def test_summary_old_run_has_blank_order_plan():
+    result = _cycle_three_cfc()
+    for s in result.skus:      # as a run saved before the order cycle setting
+        s.order_plan = s.plan_order_qty = s.plan_status = s.order_cycle_months = None
+    result.settings_used = [s.model_copy(update={"order_cycle_months": None}) for s in result.settings_used]
+    cfc = next(s for s in summarize_suppliers(result) if s.supplier == "CFC")
+    assert (cfc.order_cycle_months, cfc.plan_skus_to_order, cfc.plan_total_order_qty,
+            cfc.plan_monthly_order_qty, cfc.plan_twelve_month_total) == (None, None, None, None, None)
+    assert cfc.monthly_order_qty is not None
+
+
 def test_old_run_has_blank_monthly_totals():
     parsed = _parsed_with_stock()
     actual = actual_cartons(parse_sales((FIX / "sales_export.xlsx").read_bytes()), parsed)

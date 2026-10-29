@@ -14,7 +14,9 @@ def summarize_suppliers(result: HoldingPlan) -> list[SupplierSummary]:
             no_demand_skus=sum(1 for s in skus if s.status == SkuStatus.NO_DEMAND_DATA),
             zero_forecast_skus=sum(1 for s in skus if s.zero_forecast),
             moq=setting.moq, lead_time_days=setting.lead_time_days,
-            **_monthly_totals(skus, len(result.plan_months), blocked=setting.holding_months is None)))
+            **_monthly_totals(skus, len(result.plan_months), blocked=setting.holding_months is None),
+            **_order_plan_totals(skus, setting.order_cycle_months, len(result.plan_months),
+                                 blocked=setting.holding_months is None)))
     summaries.sort(key=lambda x: (-x.total_order_qty, x.supplier))
     return summaries
 
@@ -26,3 +28,18 @@ def _monthly_totals(skus: list[SkuResult], months: int, blocked: bool) -> dict:
         return {"monthly_order_qty": None, "twelve_month_total": None}
     totals = [sum(s.monthly[i].order or 0 for s in skus) for i in range(months)]
     return {"monthly_order_qty": totals, "twelve_month_total": sum(totals)}
+
+
+def _order_plan_totals(skus: list[SkuResult], cycle: int | None, months: int, blocked: bool) -> dict:
+    """This month's order-plan purchase order and its totals per plan month (None between order months).
+    All blank for a run saved before the order cycle setting; the monthly totals blank when holding is not set."""
+    if cycle is None or any(s.order_plan is None for s in skus):
+        return {"order_cycle_months": None}
+    out = {"order_cycle_months": cycle,
+           "plan_skus_to_order": sum(1 for s in skus if s.plan_status == SkuStatus.TO_ORDER),
+           "plan_total_order_qty": sum(s.plan_order_qty or 0 for s in skus)}
+    if blocked or not skus or not months:
+        return out
+    totals = [sum(s.order_plan[i].order or 0 for s in skus) if skus[0].order_plan[i].order_month else None
+              for i in range(months)]
+    return {**out, "plan_monthly_order_qty": totals, "plan_twelve_month_total": sum(t or 0 for t in totals)}
