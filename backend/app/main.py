@@ -12,7 +12,7 @@ from app import config
 from app.holding import forecast_window, plan_all, plan_date_bounds, validate_plan_date
 from app.export import XLSX_MEDIA_TYPE, build_export
 from app.models import (ActualSales, InputFileError, InspectResponse, ParsedInput, RunListItem,
-                        RunRecord, SettingsLogEntry, StockResult, SupplierHolding,
+                        RunRecord, SettingsLogEntry, StockResult, SupplierSettings,
                         SupplierSettingView, SupplierSummary)
 from app.parsing import parse_input
 from app.repository import Repository
@@ -55,9 +55,9 @@ def _parse_plan_date(text: str | None) -> date | None:
         raise HTTPException(status_code=422, detail=f"Plan date '{text}' is not a valid date (use YYYY-MM-DD).") from exc
 
 
-def _parse_holdings(items: list[Any]) -> list[SupplierHolding]:
+def _parse_holdings(items: list[Any]) -> list[SupplierSettings]:
     """Validate the raw PUT body so every bad value is reported with its supplier's name."""
-    holdings: list[SupplierHolding] = []
+    holdings: list[SupplierSettings] = []
     for raw in items:
         if not isinstance(raw, dict) or not isinstance(raw.get("supplier"), str) or "holding_months" not in raw:
             raise HTTPException(
@@ -69,7 +69,7 @@ def _parse_holdings(items: list[Any]) -> list[SupplierHolding]:
                 status_code=422,
                 detail=f"Supplier '{name}': holding must be between {MIN_HOLDING:g} and {MAX_HOLDING:g} "
                        f"months, or blank.")
-        holdings.append(SupplierHolding(supplier=name, holding_months=value))
+        holdings.append(SupplierSettings(supplier=name, holding_months=value))
     return holdings
 
 
@@ -79,6 +79,9 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     app = FastAPI(title="Order Plan Tool")
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"],
                        allow_methods=["*"], allow_headers=["*"])
+
+    def holdings() -> dict[str, float]:  # stop-gap until planning takes supplier settings
+        return {k: v.holding_months for k, v in repo.get_settings().items() if v.holding_months is not None}
 
     def get_run_or_404(run_id: int) -> RunRecord:
         run = repo.get_run(run_id)
@@ -117,7 +120,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             validate_plan_date(parsed, chosen)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        result = plan_all(parsed, actual, repo.get_holdings(), chosen)
+        result = plan_all(parsed, actual, holdings(), chosen)
         stock.warnings = stock.warnings + stock_date_warnings(stock, chosen)
         run_id = repo.create_run(data_file.filename or "", sales_file.filename or "",
                                  pg_file.filename or "", pdg_file.filename or "",
@@ -135,7 +138,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     @app.post("/api/runs/{run_id}/recalculate", response_model=RunRecord)
     def recalculate(run_id: int) -> RunRecord:
         run = get_run_or_404(run_id)
-        result = plan_all(run.parsed, run.actual, repo.get_holdings(), run.result.plan_date)
+        result = plan_all(run.parsed, run.actual, holdings(), run.result.plan_date)
         repo.update_run_result(run_id, result)
         return get_run_or_404(run_id)
 
@@ -152,7 +155,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                         headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
     def settings_views() -> list[SupplierSettingView]:
-        holdings = repo.get_holdings()
+        stored = holdings()
         stats: dict[str, tuple[int, int | None]] = {}
         latest = repo.latest_run_id()
         if latest is not None:
@@ -162,10 +165,10 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                     lead = sku.lead_time_days if lead is None else max(lead, sku.lead_time_days)
                 stats[sku.supplier] = (count + 1, lead)
         return [
-            SupplierSettingView(supplier=name, holding_months=holdings.get(name),
+            SupplierSettingView(supplier=name, holding_months=stored.get(name),
                                 sku_count=stats.get(name, (0, None))[0],
                                 max_lead_time_days=stats.get(name, (0, None))[1])
-            for name in sorted(set(stats) | set(holdings))]
+            for name in sorted(set(stats) | set(stored))]
 
     @app.get("/api/settings", response_model=list[SupplierSettingView])
     def get_settings() -> list[SupplierSettingView]:
@@ -173,7 +176,11 @@ def create_app(db_path: Path | None = None) -> FastAPI:
 
     @app.put("/api/settings", response_model=list[SupplierSettingView])
     def put_settings(items: list[Any]) -> list[SupplierSettingView]:
-        repo.save_holdings(_parse_holdings(items))
+        stored = repo.get_settings()  # stop-gap until the settings API takes MOQ and lead time
+        repo.save_settings([h.model_copy(update={"moq": stored[h.supplier].moq if h.supplier in stored else 0,
+                                                 "lead_time_days": stored[h.supplier].lead_time_days
+                                                 if h.supplier in stored else None})
+                            for h in _parse_holdings(items)])
         return settings_views()
 
     @app.get("/api/settings/log", response_model=list[SettingsLogEntry])

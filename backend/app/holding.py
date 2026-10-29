@@ -4,7 +4,7 @@ import math
 from datetime import date, timedelta
 
 from app.models import (ActualSales, DemandValue, HoldingPlan, ParsedInput, SkuInput, SkuResult,
-                        SkuStatus, SupplierHolding)
+                        SkuStatus, SupplierSettings)
 from app.months import next_months
 
 EPS = 1e-9
@@ -117,5 +117,5 @@ def plan_all(parsed: ParsedInput, actual: ActualSales, holdings: dict[str, float
     return HoldingPlan(
         plan_date=plan_date, actual_months=actual_months, forecast_months=forecast_months,
         skus=skus,
-        settings_used=[SupplierHolding(supplier=s, holding_months=holdings.get(s)) for s in suppliers],
+        settings_used=[SupplierSettings(supplier=s, holding_months=holdings.get(s)) for s in suppliers],
         blocked_suppliers=[s for s in suppliers if holdings.get(s) is None], counts=counts)

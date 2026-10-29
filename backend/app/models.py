@@ -2,7 +2,7 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, StrictFloat, StrictInt
+from pydantic import BaseModel
 
 
 class InputFileError(Exception):
@@ -152,14 +152,20 @@ class SkuResult(BaseModel):
     zero_forecast: bool
 
 
-class SupplierHolding(BaseModel):
+class SupplierSettings(BaseModel):
     supplier: str
-    holding_months: StrictFloat | StrictInt | None
+    holding_months: float | None
+    moq: float | None = None  # None only in runs saved before MOQ moved to supplier settings
+    lead_time_days: int | None = None
+
+
+SettingField = Literal["holding_months", "moq", "lead_time_days"]
 
 
 class SettingsLogEntry(BaseModel):
     id: int
     supplier: str
+    field: SettingField
     old_value: float | None
     new_value: float | None
     changed_at: datetime
@@ -170,7 +176,7 @@ class HoldingPlan(BaseModel):
     actual_months: list[str]
     forecast_months: list[str]  # the 3 used
     skus: list[SkuResult]
-    settings_used: list[SupplierHolding]
+    settings_used: list[SupplierSettings]
     blocked_suppliers: list[str]
     counts: dict[str, int]  # TO_ORDER, NO_ORDER_NEEDED, HOLDING_NOT_SET, NO_DEMAND_DATA, ZERO_FORECAST
 

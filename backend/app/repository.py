@@ -13,7 +13,7 @@ from app.models import (
     RunRecord,
     SettingsLogEntry,
     StockResult,
-    SupplierHolding,
+    SupplierSettings,
 )
 
 
@@ -35,39 +35,43 @@ class Repository:
         with closing(connect(self.db_path)) as conn, conn:
             yield conn
 
-    def get_holdings(self) -> dict[str, float]:
+    def get_settings(self) -> dict[str, SupplierSettings]:
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT supplier, holding_months FROM supplier_settings"
-                " WHERE holding_months IS NOT NULL"
+                "SELECT supplier, holding_months, moq, lead_time_days FROM supplier_settings"
             ).fetchall()
-        return {r["supplier"]: r["holding_months"] for r in rows}
+        return {r["supplier"]: _settings(r) for r in rows}
 
-    def save_holdings(self, items: list[SupplierHolding]) -> list[SettingsLogEntry]:
-        """Upsert holdings and log those whose value changed (a missing row counts as None)."""
+    def save_settings(self, items: list[SupplierSettings]) -> list[SettingsLogEntry]:
+        """Upsert settings and log each field whose value changed. A supplier with no stored row
+        counts as holding None, MOQ 0, lead time None."""
         now = _now()
         with self._conn() as conn:
-            stored = {r["supplier"]: r["holding_months"]
-                      for r in conn.execute("SELECT supplier, holding_months FROM supplier_settings")}
+            stored = {r["supplier"]: _settings(r) for r in conn.execute(
+                "SELECT supplier, holding_months, moq, lead_time_days FROM supplier_settings")}
             log_ids: list[int] = []
             for item in items:
-                old = stored.get(item.supplier)
-                if old == item.holding_months:
+                old = stored.get(item.supplier, SupplierSettings(supplier=item.supplier, holding_months=None,
+                                                                 moq=0, lead_time_days=None))
+                changed = [f for f in SETTING_FIELDS if getattr(old, f) != getattr(item, f)]
+                if not changed:
                     continue
                 conn.execute(
-                    "INSERT INTO supplier_settings (supplier, holding_months, updated_at)"
-                    " VALUES (?, ?, ?)"
+                    "INSERT INTO supplier_settings (supplier, holding_months, moq, lead_time_days, updated_at)"
+                    " VALUES (?, ?, ?, ?, ?)"
                     " ON CONFLICT(supplier) DO UPDATE SET"
-                    " holding_months = excluded.holding_months, updated_at = excluded.updated_at",
-                    (item.supplier, item.holding_months, now),
+                    " holding_months = excluded.holding_months, moq = excluded.moq,"
+                    " lead_time_days = excluded.lead_time_days, updated_at = excluded.updated_at",
+                    (item.supplier, item.holding_months, item.moq, item.lead_time_days, now),
                 )
-                cur = conn.execute(
-                    "INSERT INTO settings_log (supplier, old_value, new_value, changed_at)"
-                    " VALUES (?, ?, ?, ?)",
-                    (item.supplier, old, item.holding_months, now),
-                )
-                log_ids.append(int(cur.lastrowid))
-                stored[item.supplier] = item.holding_months
+                for field in changed:
+                    cur = conn.execute(
+                        "INSERT INTO settings_log (supplier, field, old_value, new_value, changed_at)"
+                        " VALUES (?, ?, ?, ?, ?)",
+                        (item.supplier, field, getattr(old, field), getattr(item, field), now),
+                    )
+                    log_ids.append(int(cur.lastrowid))
+                stored[item.supplier] = item
             rows = [conn.execute("SELECT * FROM settings_log WHERE id = ?", (i,)).fetchone()
                     for i in log_ids]
         return [_log_entry(r) for r in rows]
@@ -144,10 +148,19 @@ class Repository:
         return row["m"]
 
 
+SETTING_FIELDS = ("holding_months", "moq", "lead_time_days")
+
+
+def _settings(row: sqlite3.Row) -> SupplierSettings:
+    return SupplierSettings(supplier=row["supplier"], holding_months=row["holding_months"],
+                            moq=row["moq"], lead_time_days=row["lead_time_days"])
+
+
 def _log_entry(row: sqlite3.Row) -> SettingsLogEntry:
     return SettingsLogEntry(
         id=row["id"],
         supplier=row["supplier"],
+        field=row["field"],
         old_value=row["old_value"],
         new_value=row["new_value"],
         changed_at=row["changed_at"],

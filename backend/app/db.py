@@ -1,22 +1,27 @@
+import json
 import sqlite3
 from contextlib import closing
+from datetime import datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 V1_BACKUP_NAME = "orderplan.v1-backup"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS supplier_settings (
     supplier TEXT PRIMARY KEY,
     holding_months REAL NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    moq REAL NOT NULL DEFAULT 0,
+    lead_time_days INTEGER NULL
 );
 CREATE TABLE IF NOT EXISTS settings_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     supplier TEXT NOT NULL,
     old_value REAL NULL,
     new_value REAL NULL,
-    changed_at TEXT NOT NULL
+    changed_at TEXT NOT NULL,
+    field TEXT NOT NULL DEFAULT 'holding_months'
 );
 CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,14 +44,68 @@ CREATE TABLE IF NOT EXISTS runs (
 V3_RUN_COLUMNS = ("pg_file_name", "pdg_file_name", "stock_json")
 
 
+# Added in v4, when MOQ and lead time moved from the Data sheet to supplier settings.
+V4_COLUMNS = (
+    ("supplier_settings", "moq", "REAL NOT NULL DEFAULT 0"),
+    ("supplier_settings", "lead_time_days", "INTEGER NULL"),
+    ("settings_log", "field", "TEXT NOT NULL DEFAULT 'holding_months'"),
+)
+
+
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
-    existing = {r[1] for r in conn.execute("PRAGMA table_info(runs)")}
+    existing = _columns(conn, "runs")
     for column in V3_RUN_COLUMNS:
         if column not in existing:
             conn.execute(f"ALTER TABLE runs ADD COLUMN {column} TEXT NULL")
+    _upgrade_to_v4(conn)
     if conn.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+
+def _upgrade_to_v4(conn: sqlite3.Connection) -> None:
+    """Add the v4 columns in place and, when upgrading, pre-fill lead times, all in one transaction
+    so an interrupted upgrade leaves the database as it was and runs again on the next start."""
+    missing = [(t, c, d) for t, c, d in V4_COLUMNS if c not in _columns(conn, t)]
+    if not missing:
+        return
+    conn.execute("BEGIN")
+    try:
+        for table, column, definition in missing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        if any(column == "lead_time_days" for _, column, _ in missing):
+            _prefill_lead_times(conn)
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def _prefill_lead_times(conn: sqlite3.Connection) -> None:
+    """One-time: a supplier whose SKUs in the latest run all had the same Data-sheet lead time gets it."""
+    row = conn.execute("SELECT parsed_json FROM runs ORDER BY id DESC LIMIT 1").fetchone()
+    if row is None:
+        return
+    leads: dict[str, set] = {}
+    for sku in json.loads(row[0]).get("skus", []):
+        leads.setdefault(sku["supplier"], set()).add(sku.get("lead_time_days"))
+    now = datetime.now().isoformat(timespec="seconds")
+    stored = {r[0] for r in conn.execute("SELECT supplier FROM supplier_settings")}
+    for supplier, values in leads.items():
+        lead = next(iter(values)) if len(values) == 1 else None
+        if supplier not in stored:
+            conn.execute("INSERT INTO supplier_settings (supplier, holding_months, updated_at, moq, lead_time_days)"
+                         " VALUES (?, NULL, ?, 0, ?)", (supplier, now, lead))
+        elif lead is not None:
+            conn.execute("UPDATE supplier_settings SET lead_time_days = ?, updated_at = ? WHERE supplier = ?",
+                         (lead, now, supplier))
+        if lead is not None:
+            conn.execute("INSERT INTO settings_log (supplier, old_value, new_value, changed_at, field)"
+                         " VALUES (?, NULL, ?, ?, 'lead_time_days')", (supplier, lead, now))
 
 
 def _is_v1(db_path: Path) -> bool:
