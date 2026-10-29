@@ -74,7 +74,7 @@ def build_export(run: RunRecord) -> bytes:
     formats = {name: TWO_DECIMALS for name in ["Sellable", "PG Sellable", "PDG Sellable", "SIT", "Available",
                                        "PG Non-Sellable", "PDG Non-Sellable", *month_headers, "Buffer", "Target"]}
     formats["Stock Cover (months)"] = ONE_DECIMAL
-    _write_sheet(ws, ["Supplier", "SAP Code", "Description", "Status", "Zero Forecast", "Sellable",
+    _write_sheet(ws, ["Principal", "SAP Code", "Description", "Status", "Zero Forecast", "Sellable",
                       "PG Sellable", "PDG Sellable", "SIT", "Available", "PG Non-Sellable",
                       "PDG Non-Sellable", *month_headers, "Valid Values", "Buffer", "Holding (months)", "Target",
                       "Required", "MOQ", "MOQ Applied", "Order Qty", "Stock Cover (months)",
@@ -88,19 +88,19 @@ def build_export(run: RunRecord) -> bytes:
         total = None if sku.monthly is None or sku.holding_months is None else sum(o or 0 for o in orders)
         twelve_rows.append([sku.supplier, sku.sap_code, sku.description, sku.status.value, *orders, total])
     _write_sheet(wb.create_sheet("12-Month Plan"),
-                 ["Supplier", "SAP Code", "Description", "Status", *plan_headers, "Total"], twelve_rows)
+                 ["Principal", "SAP Code", "Description", "Status", *plan_headers, "Total"], twelve_rows)
 
     def monthly(s) -> list:
         return s.monthly_order_qty if s.monthly_order_qty is not None else [None] * len(plan_headers)
 
-    _write_sheet(wb.create_sheet("Supplier Summary"),
-                 ["Supplier", "Holding (months)", "SKUs", "SKUs to Order", "Total Order Qty",
+    _write_sheet(wb.create_sheet("Principal Summary"),
+                 ["Principal", "Holding (months)", "SKUs", "SKUs to Order", "Total Order Qty",
                   "Blocked SKUs", "No Demand SKUs", "Zero Forecast SKUs", *plan_headers, "12-Month Total"],
                  [[s.supplier, s.holding_months, s.sku_count, s.skus_to_order, s.total_order_qty,
                    s.blocked_skus, s.no_demand_skus, s.zero_forecast_skus, *monthly(s), s.twelve_month_total]
                   for s in summarize_suppliers(result)])
 
-    _write_sheet(wb.create_sheet("Settings Used"), ["Supplier", "Holding (months)", "MOQ", "Lead Time (days)"],
+    _write_sheet(wb.create_sheet("Settings Used"), ["Principal", "Holding (months)", "MOQ", "Lead Time (days)"],
                  [[s.supplier, s.holding_months, s.moq, s.lead_time_days] for s in result.settings_used])
 
     warnings = ([("Data file", w) for w in run.parsed.warnings]

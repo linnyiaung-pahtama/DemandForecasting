@@ -124,7 +124,7 @@ def parse_input(data: bytes) -> ParsedInput:
     if any(_norm(name) in columns for name in SUPPLIER_SETTING_COLUMNS):
         warnings.append(ParseWarning(
             sap_code=None, column=None,
-            message="MOQ and Lead Time columns in the Data sheet are ignored; they come from Supplier settings."))
+            message="MOQ and Lead Time columns in the Data sheet are ignored; they come from Principal settings."))
 
     mtd_cols = [(n, c) for n, c in columns.items() if MTD_RE.match(n)]
     if len(mtd_cols) != 1:

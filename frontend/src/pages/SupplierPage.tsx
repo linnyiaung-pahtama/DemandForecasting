@@ -63,7 +63,7 @@ function SupplierView({ runId }: { runId: number }) {
     <div>
       <div className="plan-head">
         <div>
-          <h2>Supplier summary</h2>
+          <h2>Principal summary</h2>
           {run && (
             <>
               <div className="muted">Plan date {fmtDate(run.result.plan_date)}</div>
@@ -93,7 +93,7 @@ function SupplierView({ runId }: { runId: number }) {
           <table>
             <thead>
               <tr>
-                <th>Supplier</th>
+                <th>Principal</th>
                 <th className="num">Holding (months)</th>
                 <th className="num">MOQ</th>
                 <th className="num">Lead time (days)</th>
@@ -147,7 +147,7 @@ function SupplierView({ runId }: { runId: number }) {
                           {lines.length === 0 ? (
                             <span className="muted">
                               {s.holding_months === null
-                                ? 'Holding not set, so no orders are calculated for this supplier.'
+                                ? 'Holding not set, so no orders are calculated for this principal.'
                                 : 'No SKUs to order.'}
                             </span>
                           ) : (
@@ -184,13 +184,13 @@ function SupplierView({ runId }: { runId: number }) {
               {summary.length === 0 && (
                 <tr>
                   <td colSpan={COLUMNS} className="muted">
-                    This run has no suppliers.
+                    This run has no principals.
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
-          <p className="muted">Expand a supplier to see the SKUs on its purchase order.</p>
+          <p className="muted">Expand a principal to see the SKUs on its purchase order.</p>
 
           <h2 className="section-head">12-month orders</h2>
           {run.result.plan_months.length === 0 ? (
@@ -199,7 +199,7 @@ function SupplierView({ runId }: { runId: number }) {
             <table>
               <thead>
                 <tr>
-                  <th>Supplier</th>
+                  <th>Principal</th>
                   {run.result.plan_months.map((m) => (
                     <th key={m} className="num">
                       {monthLabel(m)}

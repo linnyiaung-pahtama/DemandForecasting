@@ -42,7 +42,7 @@ export default function SkuDetail({ sku, planDate, warnings, onClose }: Props) {
         </div>
         <div>
           <dt>MOQ</dt>
-          <dd>{sku.moq > 0 ? `${fmtQty(sku.moq)} (supplier)` : 'none'}</dd>
+          <dd>{sku.moq > 0 ? `${fmtQty(sku.moq)} (principal)` : 'none'}</dd>
         </div>
         <div>
           <dt>Packing size</dt>

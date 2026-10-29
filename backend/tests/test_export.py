@@ -46,13 +46,13 @@ def test_export_v2_sheets_and_values(tmp_path):
     r = c.get(f"/api/runs/{run['id']}/export")
     assert r.status_code == 200 and "order-plan-2026-10-12-run" in r.headers["content-disposition"]
     wb = load(r.content)
-    assert wb.sheetnames == ["SKU Plan", "12-Month Plan", "Supplier Summary", "Settings Used", "Warnings"]
+    assert wb.sheetnames == ["SKU Plan", "12-Month Plan", "Principal Summary", "Settings Used", "Warnings"]
 
     ws = wb["SKU Plan"]
     assert ws.max_row == 213
     header = [cell.value for cell in ws[1]]
     assert header == [
-        "Supplier", "SAP Code", "Description", "Status", "Zero Forecast", "Sellable", "PG Sellable", "PDG Sellable",
+        "Principal", "SAP Code", "Description", "Status", "Zero Forecast", "Sellable", "PG Sellable", "PDG Sellable",
         "SIT", "Available", "PG Non-Sellable", "PDG Non-Sellable",
         "Jul 2026 Actual", "Aug 2026 Actual", "Sep 2026 Actual",
         "Oct 2026 Forecast", "Nov 2026 Forecast", "Dec 2026 Forecast",
@@ -61,7 +61,7 @@ def test_export_v2_sheets_and_values(tmp_path):
     assert ws["A1"].font.bold and ws.freeze_panes == "A2"
     row = next(r for r in ws.iter_rows(min_row=2, values_only=True) if r[1] == "3102111001")
     got = dict(zip(header, row))
-    assert got["Order Qty"] == 110 and got["Status"] == "TO_ORDER" and got["Supplier"] == "CFC"
+    assert got["Order Qty"] == 110 and got["Status"] == "TO_ORDER" and got["Principal"] == "CFC"
     assert got["Holding (months)"] == 3 and got["Zero Forecast"] == "No" and got["MOQ Applied"] in ("Yes", "No")
     assert abs(got["Jul 2026 Actual"] - 2113 / 40) < 1e-9 and got["Valid Values"] == 6
     assert got["Next Calculation Date"] == datetime(2026, 10, 19)
@@ -69,13 +69,13 @@ def test_export_v2_sheets_and_values(tmp_path):
     assert dict(zip(header, blocked))["Status"] == "HOLDING_NOT_SET"
     assert dict(zip(header, blocked))["Order Qty"] is None
 
-    summary = wb["Supplier Summary"]
+    summary = wb["Principal Summary"]
     assert [cell.value for cell in summary[1]] == [
-        "Supplier", "Holding (months)", "SKUs", "SKUs to Order", "Total Order Qty", "Blocked SKUs",
+        "Principal", "Holding (months)", "SKUs", "SKUs to Order", "Total Order Qty", "Blocked SKUs",
         "No Demand SKUs", "Zero Forecast SKUs", *MONTH_HEADERS, "12-Month Total"]
     assert summary.max_row == 18 and summary["A2"].value == "CFC"
     settings = wb["Settings Used"]
-    assert [cell.value for cell in settings[1]] == ["Supplier", "Holding (months)", "MOQ", "Lead Time (days)"]
+    assert [cell.value for cell in settings[1]] == ["Principal", "Holding (months)", "MOQ", "Lead Time (days)"]
     cfc = next(r for r in settings.iter_rows(min_row=2, values_only=True) if r[0] == "CFC")
     assert cfc == ("CFC", 3, 0, 7)
     assert settings.max_row == 18
@@ -132,7 +132,7 @@ def test_export_neutralises_formula_text():
     ws = wb["SKU Plan"]
     assert ws["A2"].value == "'=Evil" and ws["C2"].value == "'=SUM(A1)"
     assert ws["F2"].data_type == "n" and ws["F2"].value == 100  # numbers stay numbers
-    assert wb["Supplier Summary"]["A2"].value == "'=Evil"
+    assert wb["Principal Summary"]["A2"].value == "'=Evil"
     assert wb["Settings Used"]["A2"].value == "'=Evil"
     warn = [c.value for c in wb["Warnings"][2]]
     # only a leading "=" is neutralised; "-", "+" and "@" are ordinary text to Excel
@@ -181,7 +181,7 @@ def test_settings_used_sheet_is_blank_for_old_runs():
     run.result.settings_used = [s.model_copy(update={"moq": None, "lead_time_days": None})
                                 for s in run.result.settings_used]   # as a run saved before supplier MOQ/lead time
     ws = load(build_export(run))["Settings Used"]
-    assert [c.value for c in ws[1]] == ["Supplier", "Holding (months)", "MOQ", "Lead Time (days)"]
+    assert [c.value for c in ws[1]] == ["Principal", "Holding (months)", "MOQ", "Lead Time (days)"]
     assert next(r for r in ws.iter_rows(min_row=2, values_only=True) if r[0] == "CFC") == ("CFC", 3, None, None)
 
 
@@ -194,14 +194,14 @@ def test_twelve_month_sheet():
     wb = load(build_export(run))
     ws = wb["12-Month Plan"]
     header = [c.value for c in ws[1]]
-    assert header == ["Supplier", "SAP Code", "Description", "Status", *MONTH_HEADERS, "Total"]
+    assert header == ["Principal", "SAP Code", "Description", "Status", *MONTH_HEADERS, "Total"]
     rows = {r[1]: r for r in ws.iter_rows(min_row=2, values_only=True)}
     sku = next(s for s in run.result.skus if s.sap_code == "3102111001")
     row = rows["3102111001"]
     assert list(row[4:16]) == [p.order for p in sku.monthly] and row[16] == sum(p.order for p in sku.monthly)
     blocked = next(s for s in run.result.skus if s.supplier != "CFC")
     assert all(v is None for v in rows[blocked.sap_code][4:17])
-    summary = wb["Supplier Summary"]
+    summary = wb["Principal Summary"]
     sheader = [c.value for c in summary[1]]
     assert sheader[-13:] == [*MONTH_HEADERS, "12-Month Total"]
     srows = {r[0]: r for r in summary.iter_rows(min_row=2, values_only=True)}
@@ -214,5 +214,5 @@ def test_twelve_month_sheet_for_old_runs():
         s.monthly = None
     run.result.plan_months = []
     wb = load(build_export(run))
-    assert [c.value for c in wb["12-Month Plan"][1]] == ["Supplier", "SAP Code", "Description", "Status", "Total"]
-    assert [c.value for c in wb["Supplier Summary"][1]][-1] == "12-Month Total"
+    assert [c.value for c in wb["12-Month Plan"][1]] == ["Principal", "SAP Code", "Description", "Status", "Total"]
+    assert [c.value for c in wb["Principal Summary"][1]][-1] == "12-Month Total"

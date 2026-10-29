@@ -114,7 +114,7 @@ def test_holding_error_names_supplier_and_rejects_non_numbers(client):
     for bad in (0, 25, "abc", True, [3]):
         r = client.put("/api/settings", json=[row("Acme", bad)])
         assert r.status_code == 422
-        assert r.json()["detail"] == "Supplier 'Acme': holding must be between 0.5 and 24 months, or blank."
+        assert r.json()["detail"] == "Principal 'Acme': holding must be between 0.5 and 24 months, or blank."
 
 
 def test_failed_batch_saves_nothing(client):
@@ -154,7 +154,7 @@ def test_window_coverage_warnings_reach_inspect_and_the_stored_run(client):
     # the Data headers hold the Total Sellable/Non-Sellable stock columns, which the parser now reports as ignored
     ignored = "Stock columns in the Data sheet are ignored; stock comes from the PDG Stock List and PG Expiry Check files."
     # ...and the MOQ / Lead Time columns, which now come from supplier settings
-    settings_ignored = "MOQ and Lead Time columns in the Data sheet are ignored; they come from Supplier settings."
+    settings_ignored = "MOQ and Lead Time columns in the Data sheet are ignored; they come from Principal settings."
     parsed_messages = [ignored, settings_ignored, *expected]
     inspected = client.post("/api/inspect", files=files(data, sales)).json()
     # inspect = Data warnings, then the stock reports' merge warnings (the fixture's stock sheets have none of F1's codes)
@@ -208,8 +208,8 @@ def test_run_stores_stock_and_date_warning(client):
     assert client.get("/api/runs").json()[0]["pdg_file_name"] == "pdg.xlsx"
 
 
-MOQ_ERROR = "Supplier 'Acme': MOQ must be a whole number of cartons, 0 or more."
-LEAD_ERROR = "Supplier 'Acme': lead time must be a whole number of days from 0 to 365, or blank."
+MOQ_ERROR = "Principal 'Acme': MOQ must be a whole number of cartons, 0 or more."
+LEAD_ERROR = "Principal 'Acme': lead time must be a whole number of days from 0 to 365, or blank."
 
 
 def test_settings_round_trip(client):

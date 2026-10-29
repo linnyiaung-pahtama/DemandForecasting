@@ -77,15 +77,15 @@ def _parse_settings(items: list[Any]) -> list[SupplierSettings]:
         if holding is not None and not (_is_number(holding) and MIN_HOLDING <= holding <= MAX_HOLDING):
             raise HTTPException(
                 status_code=422,
-                detail=f"Supplier '{name}': holding must be between {MIN_HOLDING:g} and {MAX_HOLDING:g} "
+                detail=f"Principal '{name}': holding must be between {MIN_HOLDING:g} and {MAX_HOLDING:g} "
                        f"months, or blank.")
         if not (_is_whole(moq) and moq >= 0):
             raise HTTPException(
-                status_code=422, detail=f"Supplier '{name}': MOQ must be a whole number of cartons, 0 or more.")
+                status_code=422, detail=f"Principal '{name}': MOQ must be a whole number of cartons, 0 or more.")
         if lead is not None and not (_is_whole(lead) and 0 <= lead <= MAX_LEAD_TIME_DAYS):
             raise HTTPException(
                 status_code=422,
-                detail=f"Supplier '{name}': lead time must be a whole number of days from 0 to "
+                detail=f"Principal '{name}': lead time must be a whole number of days from 0 to "
                        f"{MAX_LEAD_TIME_DAYS}, or blank.")
         settings.append(SupplierSettings(supplier=name, holding_months=holding, moq=float(moq),
                                          lead_time_days=None if lead is None else int(lead)))

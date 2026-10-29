@@ -22,7 +22,7 @@ export default function App() {
           New plan
         </NavLink>
         <NavLink to="/history">History</NavLink>
-        <NavLink to="/settings">Supplier settings</NavLink>
+        <NavLink to="/settings">Principal settings</NavLink>
       </nav>
       <main className="page">
         <Routes>

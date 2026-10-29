@@ -8,7 +8,7 @@ from tests.helpers import DEFAULT_HEADERS, make_workbook
 SAMPLE = Path(__file__).parent / "fixtures" / "sample_input.xlsx"
 STOCK_COLUMNS_MESSAGE = ("Stock columns in the Data sheet are ignored; "
                          "stock comes from the PDG Stock List and PG Expiry Check files.")
-SETTINGS_COLUMNS_MESSAGE = ("MOQ and Lead Time columns in the Data sheet are ignored; they come from Supplier settings.")
+SETTINGS_COLUMNS_MESSAGE = ("MOQ and Lead Time columns in the Data sheet are ignored; they come from Principal settings.")
 
 def test_parses_sample_file():
     p = parse_input(SAMPLE.read_bytes())

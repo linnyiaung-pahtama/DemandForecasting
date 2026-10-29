@@ -136,7 +136,7 @@ export default function UploadPage() {
               <dd>{info.sku_count}</dd>
             </div>
             <div>
-              <dt>Suppliers</dt>
+              <dt>Principals</dt>
               <dd>{info.supplier_count}</dd>
             </div>
             <div>

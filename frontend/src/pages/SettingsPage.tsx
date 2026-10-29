@@ -154,11 +154,11 @@ export default function SettingsPage() {
 
   return (
     <div>
-      <h2>Supplier settings</h2>
+      <h2>Principal settings</h2>
       <p className="muted">
-        Holding is how many months of stock to keep for each supplier. Order = average monthly demand × holding −
-        (sellable + SIT). An order above 0 but below the supplier's MOQ is raised to the MOQ; the MOQ applies to each
-        SKU of the supplier on its own (0 = no minimum). Lead time only sets the next calculation date.
+        Holding is how many months of stock to keep for each principal. Order = average monthly demand × holding −
+        (sellable + SIT). An order above 0 but below the principal's MOQ is raised to the MOQ; the MOQ applies to each
+        SKU of the principal on its own (0 = no minimum). Lead time only sets the next calculation date.
       </p>
 
       {loadError && (
@@ -171,7 +171,7 @@ export default function SettingsPage() {
         !loadError && <p className="muted">Loading settings…</p>
       ) : rows.length === 0 ? (
         <p className="muted">
-          No suppliers yet. They appear here after you <Link to="/">upload a forecast</Link>.
+          No principals yet. They appear here after you <Link to="/">upload a forecast</Link>.
         </p>
       ) : (
         <>
@@ -179,7 +179,7 @@ export default function SettingsPage() {
             <table>
               <thead>
                 <tr>
-                  <th>Supplier</th>
+                  <th>Principal</th>
                   <th className="num">SKUs</th>
                   <th>Holding (months)</th>
                   <th>MOQ (cartons)</th>
@@ -288,7 +288,7 @@ export default function SettingsPage() {
             <thead>
               <tr>
                 <th>When</th>
-                <th>Supplier</th>
+                <th>Principal</th>
                 <th>Setting</th>
                 <th className="num">From</th>
                 <th className="num">To</th>

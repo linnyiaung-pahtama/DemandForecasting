@@ -135,13 +135,13 @@ function PlanView({ runId }: { runId: number }) {
           </div>
           {isLegacyRun(result) && (
             <div className="muted">
-              Saved before MOQ and lead time moved to Supplier settings — Recalculate to use the current settings.
+              Saved before MOQ and lead time moved to Principal settings — Recalculate to use the current settings.
             </div>
           )}
         </div>
         <div className="plan-actions">
           <Link className="btn" to={`/runs/${runId}/suppliers`}>
-            Supplier summary
+            Principal summary
           </Link>
           <button onClick={onRecalculate} disabled={busy}>
             {busy ? 'Recalculating…' : 'Recalculate'}
@@ -160,8 +160,8 @@ function PlanView({ runId }: { runId: number }) {
 
       {blocked > 0 && (
         <div className="alert warn">
-          {blocked === 1 ? '1 supplier has no holding set, so its SKUs are' : `${blocked} suppliers have no holding set, so their SKUs are`}{' '}
-          not calculated — set holding in <Link to="/settings">Supplier settings</Link>
+          {blocked === 1 ? '1 principal has no holding set, so its SKUs are' : `${blocked} principals have no holding set, so their SKUs are`}{' '}
+          not calculated — set holding in <Link to="/settings">Principal settings</Link>
         </div>
       )}
 
@@ -187,9 +187,9 @@ function PlanView({ runId }: { runId: number }) {
 
       <div className="filters">
         <label>
-          Supplier{' '}
+          Principal{' '}
           <select value={supplier ?? ''} onChange={(e) => setSupplier(e.target.value || null)}>
-            <option value="">All suppliers</option>
+            <option value="">All principals</option>
             {suppliers.map((s) => (
               <option key={s} value={s}>
                 {s}
@@ -246,7 +246,7 @@ function PlanView({ runId }: { runId: number }) {
               <table className="plan-table">
                 <thead>
                   <tr>
-                    <th>Supplier</th>
+                    <th>Principal</th>
                     <th>SAP Code</th>
                     <th>Description</th>
                     {result.plan_months.map((m) => (
@@ -293,7 +293,7 @@ function PlanView({ runId }: { runId: number }) {
             <table className="plan-table">
               <thead>
                 <tr>
-                  <th>Supplier</th>
+                  <th>Principal</th>
                   <th>SAP Code</th>
                   <th>Description</th>
                   <th className="num">Available</th>
