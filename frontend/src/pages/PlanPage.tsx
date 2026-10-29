@@ -128,8 +128,9 @@ function PlanView({ runId }: { runId: number }) {
       <div className="plan-head">
         <div>
           <h2>Order plan</h2>
+          <div className="muted">Plan date {fmtDate(result.plan_date)}</div>
           <div className="muted">
-            Plan date {fmtDate(result.plan_date)} · {run.file_name} + {run.sales_file_name}
+            From {run.file_name} + {run.sales_file_name}
             {run.pg_file_name !== null && run.pdg_file_name !== null && ` + ${run.pg_file_name} + ${run.pdg_file_name}`}
           </div>
           {isLegacyRun(result) && (
@@ -242,7 +243,7 @@ function PlanView({ runId }: { runId: number }) {
         <div className="table-wrap">
           {view === 'months' ? (
             hasMonthly(result) ? (
-              <table>
+              <table className="plan-table">
                 <thead>
                   <tr>
                     <th>Supplier</th>
@@ -269,10 +270,7 @@ function PlanView({ runId }: { runId: number }) {
                         <td>{s.sap_code}</td>
                         <td>{s.description}</td>
                         {(s.monthly ?? []).map((m) => (
-                          <td key={m.month} className="num">
-                            {m.order === null ? '—' : fmtQty(m.order)}
-                            {m.moq_applied && <span className="chip chip-grey tag">MOQ</span>}
-                          </td>
+                          <OrderCell key={m.month} qty={m.order} moqApplied={m.moq_applied} />
                         ))}
                         <td className="num">{total === null ? '—' : fmtQty(total)}</td>
                       </tr>
@@ -292,7 +290,7 @@ function PlanView({ runId }: { runId: number }) {
             )
           ) : (
             <>
-            <table>
+            <table className="plan-table">
               <thead>
                 <tr>
                   <th>Supplier</th>
@@ -326,10 +324,7 @@ function PlanView({ runId }: { runId: number }) {
                     </td>
                     <td className="num">{s.holding_months === null ? '—' : fmtMonths(s.holding_months)}</td>
                     <td className="num">{s.target === null ? '—' : fmtQty(s.target)}</td>
-                    <td className="num">
-                      {s.order_qty === null ? '—' : fmtQty(s.order_qty)}
-                      {s.moq_applied && <span className="chip chip-grey tag">MOQ</span>}
-                    </td>
+                    <OrderCell qty={s.order_qty} moqApplied={s.moq_applied} />
                     <td className="num">{s.stock_cover_months === null ? '—' : `${fmtCover(s.stock_cover_months)} mo`}</td>
                     <td>{s.next_calc_date === null ? '—' : fmtDate(s.next_calc_date)}</td>
                     <td>
@@ -368,5 +363,15 @@ function PlanView({ runId }: { runId: number }) {
         )}
       </div>
     </div>
+  )
+}
+
+/** An order quantity cell: quantities above zero get the turmeric tag so what needs buying stands out. */
+function OrderCell({ qty, moqApplied }: { qty: number | null; moqApplied: boolean }) {
+  return (
+    <td className={`num${qty !== null && qty > 0 ? ' order-qty' : ''}`}>
+      {qty === null ? '—' : qty > 0 ? <span className="qty">{fmtQty(qty)}</span> : fmtQty(qty)}
+      {moqApplied && <span className="chip chip-grey tag">MOQ</span>}
+    </td>
   )
 }

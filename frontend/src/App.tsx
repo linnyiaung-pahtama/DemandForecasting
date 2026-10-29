@@ -9,7 +9,15 @@ export default function App() {
   return (
     <BrowserRouter>
       <nav className="topnav">
-        <span className="brand">Order Plan</span>
+        <span className="brand">
+          {/* a taped carton */}
+          <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+            <rect x="2" y="5" width="18" height="14" rx="2" fill="#c8901a" />
+            <path d="M2 9h18" stroke="#172a31" strokeWidth="1.2" />
+            <rect x="9" y="5" width="4" height="6" fill="#f6e3b6" />
+          </svg>
+          Order Plan
+        </span>
         <NavLink to="/" end>
           New plan
         </NavLink>

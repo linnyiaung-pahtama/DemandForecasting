@@ -65,9 +65,12 @@ function SupplierView({ runId }: { runId: number }) {
         <div>
           <h2>Supplier summary</h2>
           {run && (
-            <div className="muted">
-              Plan date {fmtDate(run.result.plan_date)} · {run.file_name} + {run.sales_file_name}
-            </div>
+            <>
+              <div className="muted">Plan date {fmtDate(run.result.plan_date)}</div>
+              <div className="muted">
+                From {run.file_name} + {run.sales_file_name}
+              </div>
+            </>
           )}
         </div>
         <div className="plan-actions">
