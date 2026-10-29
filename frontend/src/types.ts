@@ -96,6 +96,7 @@ export interface MonthPlan {
   order: number | null // null when holding is not set
   moq_applied: boolean
   closing: number
+  order_month: boolean // false only for order-plan months between orders
 }
 
 export interface SkuResult {
@@ -125,6 +126,15 @@ export interface SkuResult {
   status: SkuStatus
   zero_forecast: boolean
   monthly: MonthPlan[] | null // the 12-month plan; null for runs saved before it
+  // The order plan (ordering every order_cycle_months) and its this-month values; the fields above are the
+  // order demand forecast's. Null / false for runs saved before the order cycle setting.
+  order_cycle_months: number | null
+  order_plan: MonthPlan[] | null
+  plan_order_up_to: number | null
+  plan_required: number | null
+  plan_order_qty: number | null
+  plan_moq_applied: boolean
+  plan_status: SkuStatus | null
 }
 
 export interface SupplierSettings {
@@ -132,9 +142,10 @@ export interface SupplierSettings {
   holding_months: number | null
   moq: number | null // null only in runs saved before MOQ moved to supplier settings
   lead_time_days: number | null
+  order_cycle_months: number | null // null only in runs saved before the order cycle setting
 }
 
-export type SettingField = 'holding_months' | 'moq' | 'lead_time_days'
+export type SettingField = 'holding_months' | 'moq' | 'lead_time_days' | 'order_cycle_months'
 
 export interface SettingsLogEntry {
   id: number
@@ -154,6 +165,7 @@ export interface HoldingPlan {
   settings_used: SupplierSettings[]
   blocked_suppliers: string[]
   counts: Record<string, number> // TO_ORDER, NO_ORDER_NEEDED, HOLDING_NOT_SET, NO_DEMAND_DATA, ZERO_FORECAST
+  plan_counts: Record<string, number> | null // the same keys by order-plan status; null for older runs
 }
 
 export interface RunListItem {
@@ -187,6 +199,13 @@ export interface SupplierSummary {
   lead_time_days: number | null
   monthly_order_qty: number[] | null // per plan month; null for runs saved before the 12-month plan
   twelve_month_total: number | null
+  // The order plan's figures; null for older runs. Monthly totals are also null for a principal whose holding
+  // is not set, and null in months that are not order months.
+  order_cycle_months: number | null
+  plan_skus_to_order: number | null
+  plan_total_order_qty: number | null
+  plan_monthly_order_qty: (number | null)[] | null
+  plan_twelve_month_total: number | null
 }
 
 export interface SupplierSettingView {
@@ -194,5 +213,6 @@ export interface SupplierSettingView {
   holding_months: number | null
   moq: number
   lead_time_days: number | null
+  order_cycle_months: number
   sku_count: number
 }

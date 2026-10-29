@@ -42,7 +42,12 @@ function toDrafts(rows: SupplierSettingView[]): Record<string, Draft> {
   return drafts
 }
 
-const FIELD_LABEL: Record<SettingField, string> = { holding_months: 'Holding', moq: 'MOQ', lead_time_days: 'Lead time' }
+const FIELD_LABEL: Record<SettingField, string> = {
+  holding_months: 'Holding',
+  moq: 'MOQ',
+  lead_time_days: 'Lead time',
+  order_cycle_months: 'Order cycle',
+}
 
 const EMPTY: Draft = { holding: '', moq: '', lead: '' }
 
@@ -96,7 +101,12 @@ export default function SettingsPage() {
     for (const r of rows ?? []) {
       const c = checks[r.supplier]
       if (c && !c.holding.error && !c.moq.error && !c.lead.error && c.moq.value !== null) {
-        edited[r.supplier] = { holding_months: c.holding.value, moq: c.moq.value, lead_time_days: c.lead.value }
+        edited[r.supplier] = {
+          holding_months: c.holding.value,
+          moq: c.moq.value,
+          lead_time_days: c.lead.value,
+          order_cycle_months: r.order_cycle_months,
+        }
       }
     }
     return changedSettings(rows ?? [], edited)

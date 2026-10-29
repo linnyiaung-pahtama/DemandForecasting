@@ -86,6 +86,13 @@ const worked: SkuResult = {
   status: 'TO_ORDER',
   zero_forecast: false,
   monthly: null,
+  order_cycle_months: 1,
+  order_plan: null,
+  plan_order_up_to: null,
+  plan_required: null,
+  plan_order_qty: null,
+  plan_moq_applied: false,
+  plan_status: null,
 }
 
 describe('orderExplanation', () => {
@@ -99,6 +106,46 @@ describe('orderExplanation', () => {
       'Stock cover = 260 ÷ 120 = 2.2 months',
       'Next calculation date = 14 Oct 2026 + 61 days lead time = 14 Dec 2026',
     ])
+  })
+
+  it('explains the order plan with the order-up-to level in plan mode', () => {
+    // spec small example: cycle 3, order-up-to 120 × 5 = 600, required 340, no MOQ
+    const r: SkuResult = {
+      ...worked,
+      moq: 0,
+      moq_applied: false,
+      order_qty: 100,
+      order_cycle_months: 3,
+      plan_order_up_to: 600,
+      plan_required: 340,
+      plan_order_qty: 340,
+      plan_moq_applied: false,
+      plan_status: 'TO_ORDER',
+    }
+    const lines = orderExplanation(r, '2026-10-14', 'plan')
+    expect(lines.slice(1, 4)).toEqual([
+      'Order-up-to = 120 × (3 + 3 − 1) months = 600',
+      'Available = 200 sellable + 60 SIT = 260',
+      'Required = 600 − 260 = 340',
+    ])
+    expect(lines.some((l) => l.startsWith('Target') || l.startsWith('MOQ check'))).toBe(false)
+    expect(orderExplanation(r, '2026-10-14')).toEqual(orderExplanation(r, '2026-10-14', 'forecast'))
+  })
+
+  it('uses the order plan MOQ check in plan mode', () => {
+    const r: SkuResult = {
+      ...worked,
+      moq: 500,
+      order_cycle_months: 3,
+      plan_order_up_to: 600,
+      plan_required: 340,
+      plan_order_qty: 500,
+      plan_moq_applied: true,
+      plan_status: 'TO_ORDER',
+    }
+    expect(orderExplanation(r, '2026-10-14', 'plan')).toContain(
+      'MOQ check: 340 is below the MOQ of 500, so the order is 500',
+    )
   })
 
   it('splits the available line into PG and PDG sellable when the breakdown is stored', () => {
@@ -271,11 +318,12 @@ describe('isLegacyRun', () => {
     plan_months: [],
     skus: [],
     settings_used: [
-      { supplier: 'A', holding_months: 2, moq: 0, lead_time_days: 14 },
-      { supplier: 'B', holding_months: null, moq, lead_time_days: null },
+      { supplier: 'A', holding_months: 2, moq: 0, lead_time_days: 14, order_cycle_months: 1 },
+      { supplier: 'B', holding_months: null, moq, lead_time_days: null, order_cycle_months: 1 },
     ],
     blocked_suppliers: [],
     counts: {},
+    plan_counts: null,
   })
 
   it('is true when a supplier in settings_used has no recorded MOQ (saved before supplier MOQ/lead time)', () => {
@@ -294,6 +342,7 @@ const month = (key: string, order: number | null): MonthPlan => ({
   order,
   moq_applied: false,
   closing: 0,
+  order_month: true,
 })
 
 describe('monthlyTotal', () => {
@@ -342,6 +391,7 @@ describe('hasMonthly', () => {
     settings_used: [],
     blocked_suppliers: [],
     counts: {},
+    plan_counts: null,
   })
   const withMonths = { ...worked, monthly: [month('2026-10', 150)] }
 

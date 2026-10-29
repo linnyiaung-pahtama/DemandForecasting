@@ -69,4 +69,15 @@ describe('filterSkus', () => {
   it('combines filters', () => {
     expect(codes(filterSkus(skus, { ...none, supplier: 'A', status: 'TO_ORDER' }))).toEqual(['6', '2'])
   })
+
+  it('filters and sorts on the order plan status and quantity in plan mode', () => {
+    const rows = [
+      sku('p', 'A', 'NO_ORDER_NEEDED', 0, { plan_status: 'TO_ORDER', plan_order_qty: 200 }),
+      sku('q', 'A', 'TO_ORDER', 50, { plan_status: 'TO_ORDER', plan_order_qty: 400 }),
+      sku('r', 'A', 'TO_ORDER', 90, { plan_status: 'NO_ORDER_NEEDED', plan_order_qty: 0 }),
+    ]
+    expect(codes(filterSkus(rows, { ...none, status: 'TO_ORDER' }))).toEqual(['r', 'q'])
+    expect(codes(filterSkus(rows, { ...none, status: 'TO_ORDER' }, 'plan'))).toEqual(['q', 'p'])
+    expect(codes(filterSkus(rows, none, 'plan'))).toEqual(['q', 'p', 'r'])
+  })
 })

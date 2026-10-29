@@ -1,3 +1,4 @@
+import type { PlanMode } from './mode'
 import type { DemandValue, HoldingPlan, SkuResult, SkuStatus } from '../types'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -73,7 +74,7 @@ function plural(n: number, unit: string): string {
  * One line per calculation step, built only from the numbers stored on the SKU result so the
  * planner can follow the arithmetic. `planDate` is the plan's date (ISO), used for the last line.
  */
-export function orderExplanation(r: SkuResult, planDate: string): string[] {
+export function orderExplanation(r: SkuResult, planDate: string, mode: PlanMode = 'forecast'): string[] {
   const monthCount = r.demand_values.length
   const holdingNotSet = `Holding not set for ${r.supplier} — no order calculated`
   const valid = r.demand_values.filter((d) => d.valid && d.value !== null).map((d) => d.value as number)
@@ -93,23 +94,33 @@ export function orderExplanation(r: SkuResult, planDate: string): string[] {
       ? `Available = ${fmtExact(r.pg_sellable)} PG sellable + ${fmtExact(r.pdg_sellable)} PDG sellable + ${fmtExact(r.sit)} SIT = ${fmtExact(r.available)}`
       : `Available = ${fmtExact(r.sellable)} sellable + ${fmtExact(r.sit)} SIT = ${fmtExact(r.available)}`
 
-  if (r.holding_months === null || r.target === null || r.required === null) {
+  // The order plan tops stock up to the order-up-to level instead of the target; the steps are otherwise the same.
+  const plan = mode === 'plan'
+  const level = plan ? r.plan_order_up_to : r.target
+  const required = plan ? r.plan_required : r.required
+  const orderQty = plan ? r.plan_order_qty : r.order_qty
+  const moqApplied = plan ? r.plan_moq_applied : r.moq_applied
+
+  if (r.holding_months === null || level === null || required === null) {
     lines.push(holdingNotSet, available)
   } else {
-    lines.push(`Target = ${fmtExact(r.buffer)} × ${plural(r.holding_months, 'month')} = ${fmtExact(r.target)}`, available)
-    if (r.required === 0) {
-      lines.push('Required = 0 (available already covers the target)')
+    const levelLine = plan
+      ? `Order-up-to = ${fmtExact(r.buffer)} × (${fmtMonths(r.holding_months)} + ${r.order_cycle_months ?? 1} − 1) months = ${fmtExact(level)}`
+      : `Target = ${fmtExact(r.buffer)} × ${plural(r.holding_months, 'month')} = ${fmtExact(level)}`
+    lines.push(levelLine, available)
+    if (required === 0) {
+      lines.push(`Required = 0 (available already covers the ${plan ? 'order-up-to level' : 'target'})`)
     } else {
-      const gap = r.target - r.available
-      const roundedUp = Math.abs(gap - r.required) > EPSILON
+      const gap = level - r.available
+      const roundedUp = Math.abs(gap - required) > EPSILON
       lines.push(
-        `Required = ${fmtExact(r.target)} − ${fmtExact(r.available)} = ` +
-          (roundedUp ? `${fmtExact(gap)}, rounded up to ${fmtQty(r.required)}` : fmtQty(r.required)),
+        `Required = ${fmtExact(level)} − ${fmtExact(r.available)} = ` +
+          (roundedUp ? `${fmtExact(gap)}, rounded up to ${fmtQty(required)}` : fmtQty(required)),
       )
     }
-    if (r.moq_applied && r.moq > 0 && r.order_qty !== null) {
+    if (moqApplied && r.moq > 0 && orderQty !== null) {
       lines.push(
-        `MOQ check: ${fmtQty(r.required)} is below the MOQ of ${fmtQty(r.moq)}, so the order is ${fmtQty(r.order_qty)}`,
+        `MOQ check: ${fmtQty(required)} is below the MOQ of ${fmtQty(r.moq)}, so the order is ${fmtQty(orderQty)}`,
       )
     }
   }
