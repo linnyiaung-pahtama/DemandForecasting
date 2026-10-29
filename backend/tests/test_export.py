@@ -12,21 +12,22 @@ from app.models import ParseWarning, RunRecord, StockFileSummary, StockResult
 from app.parsing import parse_input
 from app.sales import actual_cartons, parse_sales
 from app.stock import apply_stock, parse_pdg, parse_pg
-from tests.helpers import make_pdg_workbook, make_pg_workbook, make_sales_workbook, make_workbook
+from tests.helpers import (holding_settings, make_pdg_workbook, make_pg_workbook, make_sales_workbook,
+                           make_workbook)
 
 FIX = Path(__file__).parent / "fixtures"
 DATA, SALES = (FIX / "sample_input.xlsx").read_bytes(), (FIX / "sales_export.xlsx").read_bytes()
 
 
 def make_run(data: bytes, sales: bytes, holdings: dict[str, float], warnings=None,
-             pg: bytes | None = None, pdg: bytes | None = None) -> RunRecord:
+             pg: bytes | None = None, pdg: bytes | None = None, lead: int | None = None) -> RunRecord:
     """pg/pdg are the stock report workbooks; they default to the Data workbook itself (the fixture holds all three)."""
     parsed, _ = apply_stock(parse_input(data), parse_pg(pg or data), parse_pdg(pdg or data))
     actual = actual_cartons(parse_sales(sales), parsed)
     if warnings is not None:
         parsed.warnings = warnings[0]
         actual.warnings = warnings[1]
-    result = plan_all(parsed, actual, holdings, date(2026, 10, 12))
+    result = plan_all(parsed, actual, holding_settings(holdings, lead=lead), date(2026, 10, 12))
     return RunRecord(id=1, created_at=datetime(2026, 10, 12), file_name="d.xlsx", sales_file_name="s.xlsx",
                      plan_date=result.plan_date, sku_count=len(result.skus),
                      parsed=parsed, actual=actual, result=result)
@@ -141,7 +142,7 @@ def test_export_leaves_plus_minus_at_text_alone():
 
 
 def test_export_number_formats():
-    run = make_run(DATA, SALES, {"CFC": 3})
+    run = make_run(DATA, SALES, {"CFC": 3}, lead=7)   # CFC's lead time, so the date column is filled
     ws = load(build_export(run))["SKU Plan"]
     header = [c.value for c in ws[1]]
     row = next(r for r in ws.iter_rows(min_row=2) if r[1].value == "3102111001")

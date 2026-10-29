@@ -3,20 +3,21 @@ from datetime import date
 import pytest
 
 from app.holding import plan_date_bounds, plan_sku, validate_plan_date
-from app.models import SkuInput, SkuStatus
+from app.models import ActualSales, SkuInput, SkuStatus, SupplierSettings
 
 ACT = ["2026-07", "2026-08", "2026-09"]; FC = ["2026-10", "2026-11", "2026-12"]
 PD = date(2026, 10, 14)
 
 
-def sku(sellable=200, sit=60, moq=150, lead=61, fc=(130, 140, 120)):
-    return SkuInput(sap_code="N1", supplier="Alpha Foods", description="Noodles", packing_size=10,
-                    moq=moq, shelf_life_months=None, lead_time_days=lead, sellable=sellable,
+def sku(sellable=200, sit=60, fc=(130, 140, 120), supplier="Alpha Foods", code="N1"):
+    # MOQ and lead time come from supplier settings, so the SKU's own (old Data sheet) fields stay empty
+    return SkuInput(sap_code=code, supplier=supplier, description="Noodles", packing_size=10,
+                    moq=0, shelf_life_months=None, lead_time_days=None, sellable=sellable,
                     non_sellable=0, sit=sit, mtd_sales=0, forecast=dict(zip(FC, fc)))
 
 
-def run(actuals=(100, 120, 110), holding=3, **kw):
-    return plan_sku(sku(**kw), dict(zip(ACT, actuals)), ACT, FC, holding, PD)
+def run(actuals=(100, 120, 110), holding=3, moq=150, lead=61, **kw):
+    return plan_sku(sku(**kw), dict(zip(ACT, actuals)), ACT, FC, holding, PD, moq=moq, lead_time_days=lead)
 
 
 def test_spec_worked_example():
@@ -34,7 +35,7 @@ def test_spec_worked_example():
 def test_breakdown_is_copied_to_result():
     s = sku(sellable=200)
     s.pg_sellable, s.pdg_sellable, s.pg_non_sellable, s.pdg_non_sellable = 150, 50, 7, 3
-    r = plan_sku(s, dict(zip(ACT, (100, 120, 110))), ACT, FC, 3, PD)
+    r = plan_sku(s, dict(zip(ACT, (100, 120, 110))), ACT, FC, 3, PD, moq=150, lead_time_days=61)
     assert (r.pg_sellable, r.pdg_sellable, r.pg_non_sellable, r.pdg_non_sellable) == (150, 50, 7, 3)
     assert r.sellable == 200
     blank = run()
@@ -45,7 +46,7 @@ def test_invalid_values_are_skipped():
     r = run(actuals=(-5, 0, 110))          # -5 and 0 invalid
     assert r.valid_count == 4 and r.buffer == pytest.approx((110 + 130 + 140 + 120) / 4)
     assert [d.valid for d in r.demand_values] == [False, False, True, True, True, True]
-    r2 = plan_sku(sku(), {"2026-09": 110}, ACT, FC, 3, PD)   # Jul/Aug missing from actuals
+    r2 = plan_sku(sku(), {"2026-09": 110}, ACT, FC, 3, PD, moq=150, lead_time_days=61)   # Jul/Aug missing from actuals
     assert r2.demand_values[0].value is None and r2.valid_count == 4
 
 
@@ -168,6 +169,53 @@ def test_plan_all_counts_have_exactly_the_five_keys():
     raw = (Path(__file__).parent / "fixtures" / "sample_input.xlsx").read_bytes()
     parsed = apply_stock(parse_input(raw), parse_pg(raw), parse_pdg(raw))[0]
     actual = ActualSales(months=ACT, cartons={}, skus_with_sales=0, warnings=[])
-    result = plan_all(parsed, actual, {"Alpha Foods": 2}, parsed.default_plan_date)
+    result = plan_all(parsed, actual, {"Alpha Foods": SupplierSettings(supplier="Alpha Foods", holding_months=2, moq=0)},
+                      parsed.default_plan_date)
     assert set(result.counts) == {"TO_ORDER", "NO_ORDER_NEEDED", "HOLDING_NOT_SET", "NO_DEMAND_DATA",
                                   "ZERO_FORECAST"}
+
+
+def test_supplier_moq_raises_each_sku():
+    assert (run(moq=150).order_qty, run(moq=150).moq_applied) == (150, True)   # required 100
+    assert (run(moq=0).order_qty, run(moq=0).moq_applied) == (100, False)
+    r0 = run(sellable=500, moq=150)                                           # required 0
+    assert r0.order_qty == 0 and not r0.moq_applied
+
+
+def test_plan_sku_ignores_moq_and_lead_on_sku_input():
+    s = sku().model_copy(update={"moq": 999, "lead_time_days": 5})
+    r = plan_sku(s, dict(zip(ACT, (100, 120, 110))), ACT, FC, 3, PD, moq=0, lead_time_days=None)
+    assert r.order_qty == 100 and not r.moq_applied and r.moq == 0
+    assert r.next_calc_date is None and r.lead_time_days is None
+
+
+def test_blank_lead_time_does_not_block():
+    r = run(lead=None)
+    assert r.status == SkuStatus.TO_ORDER and r.next_calc_date is None and r.order_qty == 150
+
+
+def _plan(skus, settings):
+    from app.holding import plan_all
+    from app.models import ParsedInput
+    parsed = ParsedInput(skus=skus, forecast_months=FC, mtd_month="2026-10", mtd_label="x",
+                         mtd_end=date(2026, 10, 11), default_plan_date=date(2026, 10, 12), warnings=[])
+    actual = ActualSales(months=ACT, cartons={s.sap_code: dict(zip(ACT, (100, 120, 110))) for s in skus},
+                         skus_with_sales=len(skus), warnings=[])
+    return plan_all(parsed, actual, settings, PD)
+
+
+def test_plan_all_supplier_without_settings():
+    result = _plan([sku(supplier="New Co")], {})
+    r = result.skus[0]
+    assert r.status == SkuStatus.HOLDING_NOT_SET and r.next_calc_date is None and r.moq == 0
+    assert result.settings_used == [SupplierSettings(supplier="New Co", holding_months=None, moq=0,
+                                                     lead_time_days=None)]
+    assert result.blocked_suppliers == ["New Co"]
+
+
+def test_plan_all_uses_supplier_settings():
+    settings = {"S": SupplierSettings(supplier="S", holding_months=3, moq=150, lead_time_days=61)}
+    result = _plan([sku(supplier="S", code="A"), sku(supplier="S", code="B")], settings)
+    assert all(r.moq == 150 and r.order_qty == 150 and r.moq_applied for r in result.skus)
+    assert all(r.lead_time_days == 61 and r.next_calc_date == date(2026, 12, 14) for r in result.skus)
+    assert result.settings_used == [settings["S"]] and result.blocked_suppliers == []

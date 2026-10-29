@@ -8,6 +8,7 @@ from tests.helpers import DEFAULT_HEADERS, make_workbook
 SAMPLE = Path(__file__).parent / "fixtures" / "sample_input.xlsx"
 STOCK_COLUMNS_MESSAGE = ("Stock columns in the Data sheet are ignored; "
                          "stock comes from the PDG Stock List and PG Expiry Check files.")
+SETTINGS_COLUMNS_MESSAGE = ("MOQ and Lead Time columns in the Data sheet are ignored; they come from Supplier settings.")
 
 def test_parses_sample_file():
     p = parse_input(SAMPLE.read_bytes())
@@ -20,7 +21,7 @@ def test_parses_sample_file():
     assert p.default_plan_date == date(2026, 10, 12)
     sku = next(s for s in p.skus if s.sap_code == "3401111006")
     assert sku.supplier == "MayMyo Fresh Coffee"
-    assert sku.lead_time_days == 7 and sku.packing_size == 30 and sku.shelf_life_months == 12
+    assert sku.lead_time_days is None and sku.packing_size == 30 and sku.shelf_life_months == 12
     assert sku.sellable == 0 and sku.pg_sellable is None   # stock comes from the stock reports
     assert sku.sit == pytest.approx(41, abs=0.01)
     assert sku.forecast["2026-10"] == pytest.approx(128.71, abs=0.01)
@@ -60,7 +61,7 @@ def test_blank_and_text_numbers_become_zero_with_warning():
 def test_data_sheet_without_stock_columns_parses():
     headers = [h for h in DEFAULT_HEADERS if h not in ("Total Sellable (Ctns)", "Total Non-Sellable (Ctns)")]
     p = parse_input(make_workbook([["1001", "Honesty", "X", 12, 0, 6, 14, 3, 5] + [10] * 12], headers=headers))
-    assert p.warnings == []
+    assert [w.message for w in p.warnings] == [SETTINGS_COLUMNS_MESSAGE]
     assert p.skus[0].sellable == 0 and p.skus[0].non_sellable == 0 and p.skus[0].sit == 3
     assert p.skus[0].pg_sellable is None and p.skus[0].pdg_non_sellable is None
 
@@ -69,22 +70,21 @@ def test_each_stock_column_triggers_the_single_ignored_warning():
     headers = [h for h in DEFAULT_HEADERS if h not in ("Total Sellable (Ctns)", "Total Non-Sellable (Ctns)")]
     headers.insert(7, "Sellable (PG)")
     p = parse_input(make_workbook([["1001", "Honesty", "X", 12, 0, 6, 14, 9, 3, 5] + [10] * 12], headers=headers))
-    assert [w.message for w in p.warnings] == [STOCK_COLUMNS_MESSAGE]
+    assert [w.message for w in p.warnings] == [STOCK_COLUMNS_MESSAGE, SETTINGS_COLUMNS_MESSAGE]
     assert p.warnings[0].sap_code is None and p.warnings[0].column is None
     assert p.skus[0].sit == 3 and p.skus[0].sellable == 0
 
 
-def test_missing_lead_time_is_none_with_warning():
-    data = make_workbook([["1001","Honesty","X",12,0,6,None,10,0,0,5] + [10]*12])
-    p = parse_input(data)
-    assert p.skus[0].lead_time_days is None
-    assert any(w.column == "Lead Time" for w in p.warnings)
-
-def test_negative_lead_time_is_none_with_warning():
-    data = make_workbook([["1001","Honesty","X",12,0,6,-5,10,0,0,5] + [10]*12])
-    p = parse_input(data)
-    assert p.skus[0].lead_time_days is None
-    assert any(w.column == "Lead Time" and "negative lead time" in w.message for w in p.warnings)
+def test_moq_and_lead_columns_are_optional_and_ignored():
+    stock = ("Total Sellable (Ctns)", "Total Non-Sellable (Ctns)")
+    without = [h for h in DEFAULT_HEADERS if h not in stock + ("MOQ", "Lead Time")]
+    p = parse_input(make_workbook([["1001", "Honesty", "X", 12, 6, 3, 5] + [10] * 12], headers=without))
+    assert p.warnings == [] and p.skus[0].moq == 0 and p.skus[0].lead_time_days is None
+    with_cols = [h for h in DEFAULT_HEADERS if h not in stock]
+    p = parse_input(make_workbook([["1001", "Honesty", "X", 12, 8000, 6, -5, 3, 5] + [10] * 12], headers=with_cols))
+    assert [w.message for w in p.warnings] == [SETTINGS_COLUMNS_MESSAGE]
+    assert p.warnings[0].sap_code is None and p.warnings[0].column is None
+    assert p.skus[0].moq == 0 and p.skus[0].lead_time_days is None   # the values are never read
 
 def test_duplicate_sap_code_keeps_first_with_warning():
     row = ["1001","Honesty","X",12,0,6,14,10,0,0,5] + [10]*12
@@ -97,7 +97,7 @@ def test_rejects_missing_data_sheet():
 
 def test_rejects_missing_required_column():
     headers = ["SAP Code","By Principal","Description"]
-    with pytest.raises(InputFileError, match="Lead Time"):
+    with pytest.raises(InputFileError, match="Packing Size"):
         parse_input(make_workbook([], headers=headers))
 
 def test_rejects_non_excel_bytes():
@@ -109,10 +109,11 @@ def test_numeric_text_is_parsed():
     p = parse_input(data)
     s = p.skus[0]
     assert s.packing_size == 12 and s.moq == 0 and s.shelf_life_months == 6
-    assert s.lead_time_days == 14
+    assert s.lead_time_days is None
     assert s.sit == 7 and s.mtd_sales == 1000
     assert s.forecast["2026-10"] == 1250.5
-    assert [w.message for w in p.warnings] == [STOCK_COLUMNS_MESSAGE]   # the old-style stock columns are ignored
+    # the old-style stock, MOQ and lead time columns are ignored
+    assert [w.message for w in p.warnings] == [STOCK_COLUMNS_MESSAGE, SETTINGS_COLUMNS_MESSAGE]
 
 
 # ---- header handling and value cleaning ------------------------------------------------------
@@ -153,7 +154,7 @@ def test_sept_and_curly_apostrophe_headers_parse():
     p = parse_input(make_workbook([ROW + [10, 10, 10]], headers=headers))
     assert p.mtd_month == "2026-09" and p.mtd_end == date(2026, 9, 8)
     assert p.forecast_months == ["2026-09", "2026-10", "2026-11"]
-    assert [w.message for w in p.warnings] == [STOCK_COLUMNS_MESSAGE]
+    assert [w.message for w in p.warnings] == [STOCK_COLUMNS_MESSAGE, SETTINGS_COLUMNS_MESSAGE]
 
 
 def test_four_letter_june_forecast_header_parses():
@@ -214,7 +215,8 @@ def test_v1_only_warnings_say_they_are_not_used():
     rows = [["1001", "Honesty", "X", 12, 0, 0, 14, 10, 0, 0, -5] + [10] * 12,
             ["1002", "Honesty", "X", 12, 0, -2, 14, 10, 0, 0, 5] + [10] * 12,
             ["1003", "Honesty", "X", 12, 0, "n/a", 14, 10, 0, 0, 5] + [10] * 12]
-    msgs = [w.message for w in parse_input(make_workbook(rows)).warnings if w.message != STOCK_COLUMNS_MESSAGE]
+    msgs = [w.message for w in parse_input(make_workbook(rows)).warnings
+            if w.message not in (STOCK_COLUMNS_MESSAGE, SETTINGS_COLUMNS_MESSAGE)]
     assert sorted(msgs) == [
         "negative MTD sales (not used in the order calculation)",
         "negative shelf life (not used in the order calculation)",

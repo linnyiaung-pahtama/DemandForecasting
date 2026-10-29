@@ -13,15 +13,16 @@ REQUIRED_COLUMNS = [
     "By Principal",
     "Description",
     "Packing Size",
-    "MOQ",
     "Shelf Life month",
-    "Lead Time",
     "SIT Ctns (pending order)",
 ]
 
 # Stock now comes from the PDG Stock List and PG Expiry Check files; these Data columns are never read.
 STOCK_COLUMNS = ["Sellable (PG)", "Sellable (PDG)", "Total Sellable (Ctns)",
                  "Non-Sellable (PG)", "Non-Sellable (PDG)", "Total Non-Sellable (Ctns)"]
+
+# MOQ and lead time are supplier settings now; these Data columns are never read.
+SUPPLIER_SETTING_COLUMNS = ["MOQ", "Lead Time"]
 
 MONTH_NAMES = ["january", "february", "march", "april", "may", "june", "july", "august",
                "september", "october", "november", "december"]
@@ -120,6 +121,10 @@ def parse_input(data: bytes) -> ParsedInput:
             sap_code=None, column=None,
             message="Stock columns in the Data sheet are ignored; "
                     "stock comes from the PDG Stock List and PG Expiry Check files."))
+    if any(_norm(name) in columns for name in SUPPLIER_SETTING_COLUMNS):
+        warnings.append(ParseWarning(
+            sap_code=None, column=None,
+            message="MOQ and Lead Time columns in the Data sheet are ignored; they come from Supplier settings."))
 
     mtd_cols = [(n, c) for n, c in columns.items() if MTD_RE.match(n)]
     if len(mtd_cols) != 1:
@@ -188,9 +193,7 @@ def parse_input(data: bytes) -> ParsedInput:
     c_sup, _ = col("By Principal")
     c_desc, _ = col("Description")
     c_pack, h_pack = col("Packing Size")
-    c_moq, h_moq = col("MOQ")
     c_shelf, h_shelf = col("Shelf Life month")
-    c_lead, h_lead = col("Lead Time")
     c_sit, h_sit = col("SIT Ctns (pending order)")
 
     skus: list[SkuInput] = []
@@ -239,17 +242,6 @@ def parse_input(data: bytes) -> ParsedInput:
             warnings.append(ParseWarning(sap_code=sap, column=h_shelf,
                                          message="non-numeric shelf life (not used in the order calculation)"))
 
-        lead_num = _to_number(cell(c_lead))
-        if lead_num is not None and lead_num < 0:
-            lead: int | None = None
-            warnings.append(ParseWarning(sap_code=sap, column=h_lead,
-                                         message="negative lead time treated as missing"))
-        elif lead_num is not None:
-            lead = int(round(lead_num))
-        else:
-            lead = None
-            warnings.append(ParseWarning(sap_code=sap, column=h_lead,
-                                         message="missing or non-numeric lead time"))
 
         mtd = num(mtd_col, mtd_label)
         if mtd < 0:
@@ -275,9 +267,9 @@ def parse_input(data: bytes) -> ParsedInput:
             supplier=_collapse(cell(c_sup)),
             description=_collapse(cell(c_desc)),
             packing_size=packing,
-            moq=num(c_moq, h_moq),
+            moq=0.0,  # MOQ and lead time come from supplier settings
             shelf_life_months=shelf,
-            lead_time_days=lead,
+            lead_time_days=None,
             sellable=0.0,  # stock is filled in only by stock.apply_stock; callers must apply the stock reports
             non_sellable=0.0,
             sit=sit,

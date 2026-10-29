@@ -16,7 +16,9 @@ def _is_valid(value: float | None) -> bool:
 
 def plan_sku(sku: SkuInput, actuals: dict[str, float], actual_months: list[str],
              forecast_months: list[str], holding_months: float | None,
-             plan_date: date) -> SkuResult:
+             plan_date: date, moq: float = 0.0, lead_time_days: int | None = None) -> SkuResult:
+    """Plan one SKU. MOQ and lead time are the supplier's settings; the SKU's own (old Data sheet)
+    moq / lead_time_days fields are never read."""
     demand_values = [DemandValue(month=m, source="actual", value=actuals.get(m),
                                  valid=_is_valid(actuals.get(m))) for m in actual_months]
     demand_values += [DemandValue(month=m, source="forecast", value=sku.forecast.get(m),
@@ -38,8 +40,8 @@ def plan_sku(sku: SkuInput, actuals: dict[str, float], actual_months: list[str],
         # available is negative
         required = max(math.ceil(target - available - EPS), 0) if valid_count else 0
         order_qty = required
-        if 0 < required < sku.moq:
-            order_qty = math.ceil(sku.moq - EPS)
+        if 0 < required < moq:
+            order_qty = math.ceil(moq - EPS)
             moq_applied = True
 
     if holding_months is None:
@@ -51,7 +53,7 @@ def plan_sku(sku: SkuInput, actuals: dict[str, float], actual_months: list[str],
     else:
         status = SkuStatus.NO_ORDER_NEEDED
 
-    lead = sku.lead_time_days
+    lead = lead_time_days
     next_calc_date = None
     if lead is not None and lead >= 0:
         try:
@@ -61,7 +63,7 @@ def plan_sku(sku: SkuInput, actuals: dict[str, float], actual_months: list[str],
 
     return SkuResult(
         sap_code=sku.sap_code, supplier=sku.supplier, description=sku.description,
-        packing_size=sku.packing_size, lead_time_days=lead, moq=sku.moq, sellable=sku.sellable,
+        packing_size=sku.packing_size, lead_time_days=lead, moq=moq, sellable=sku.sellable,
         sit=sku.sit, available=available, pg_sellable=sku.pg_sellable, pdg_sellable=sku.pdg_sellable,
         pg_non_sellable=sku.pg_non_sellable, pdg_non_sellable=sku.pdg_non_sellable,
         demand_values=demand_values, valid_count=valid_count,
@@ -101,14 +103,22 @@ def forecast_window(parsed: ParsedInput) -> list[str]:
     return next_months(parsed.mtd_month, 3)
 
 
-def plan_all(parsed: ParsedInput, actual: ActualSales, holdings: dict[str, float],
+def plan_all(parsed: ParsedInput, actual: ActualSales, settings: dict[str, SupplierSettings],
              plan_date: date) -> HoldingPlan:
-    """Plan every SKU in the Data file with the current supplier holdings."""
+    """Plan every SKU in the Data file with the current supplier settings. A supplier without
+    stored settings plans with holding not set, MOQ 0 and no lead time."""
     actual_months = actual.months
     forecast_months = forecast_window(parsed)
-    skus = [plan_sku(sku, actual.cartons.get(sku.sap_code, {}), actual_months, forecast_months,
-                     holdings.get(sku.supplier), plan_date) for sku in parsed.skus]
     suppliers = list(dict.fromkeys(sku.supplier for sku in parsed.skus))  # first-appearance order
+    used = {}
+    for s in suppliers:
+        stored = settings.get(s)
+        used[s] = SupplierSettings(
+            supplier=s, holding_months=stored.holding_months if stored else None,
+            moq=(stored.moq or 0.0) if stored else 0.0, lead_time_days=stored.lead_time_days if stored else None)
+    skus = [plan_sku(sku, actual.cartons.get(sku.sap_code, {}), actual_months, forecast_months,
+                     used[sku.supplier].holding_months, plan_date, moq=used[sku.supplier].moq,
+                     lead_time_days=used[sku.supplier].lead_time_days) for sku in parsed.skus]
     counts = {status.value: 0 for status in SkuStatus}
     counts[ZERO_FORECAST_KEY] = 0
     for result in skus:
@@ -117,5 +127,5 @@ def plan_all(parsed: ParsedInput, actual: ActualSales, holdings: dict[str, float
     return HoldingPlan(
         plan_date=plan_date, actual_months=actual_months, forecast_months=forecast_months,
         skus=skus,
-        settings_used=[SupplierSettings(supplier=s, holding_months=holdings.get(s)) for s in suppliers],
-        blocked_suppliers=[s for s in suppliers if holdings.get(s) is None], counts=counts)
+        settings_used=list(used.values()),
+        blocked_suppliers=[s for s in suppliers if used[s].holding_months is None], counts=counts)

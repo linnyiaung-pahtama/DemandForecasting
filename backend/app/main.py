@@ -120,7 +120,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             validate_plan_date(parsed, chosen)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        result = plan_all(parsed, actual, holdings(), chosen)
+        result = plan_all(parsed, actual, repo.get_settings(), chosen)
         stock.warnings = stock.warnings + stock_date_warnings(stock, chosen)
         run_id = repo.create_run(data_file.filename or "", sales_file.filename or "",
                                  pg_file.filename or "", pdg_file.filename or "",
@@ -138,7 +138,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     @app.post("/api/runs/{run_id}/recalculate", response_model=RunRecord)
     def recalculate(run_id: int) -> RunRecord:
         run = get_run_or_404(run_id)
-        result = plan_all(run.parsed, run.actual, holdings(), run.result.plan_date)
+        result = plan_all(run.parsed, run.actual, repo.get_settings(), run.result.plan_date)
         repo.update_run_result(run_id, result)
         return get_run_or_404(run_id)
 

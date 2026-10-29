@@ -6,6 +6,7 @@ from app.parsing import parse_input
 from app.sales import actual_cartons, parse_sales
 from app.stock import apply_stock, parse_pdg, parse_pg
 from app.summary import summarize_suppliers
+from tests.helpers import holding_settings
 
 FIX = Path(__file__).parent / "fixtures"
 
@@ -18,7 +19,7 @@ def _parsed_with_stock():
 def test_summary_rolls_up_real_fixtures():
     parsed = _parsed_with_stock()
     actual = actual_cartons(parse_sales((FIX / "sales_export.xlsx").read_bytes()), parsed)
-    result = plan_all(parsed, actual, {"CFC": 3}, date(2026, 10, 12))
+    result = plan_all(parsed, actual, holding_settings({"CFC": 3}), date(2026, 10, 12))
     summary = summarize_suppliers(result)
     cfc = next(s for s in summary if s.supplier == "CFC")
     cfc_skus = [s for s in result.skus if s.supplier == "CFC"]

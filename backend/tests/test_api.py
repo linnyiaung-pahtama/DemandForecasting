@@ -147,7 +147,9 @@ def test_window_coverage_warnings_reach_inspect_and_the_stored_run(client):
                 "No forecast column for Dec 2026 — counted as missing"]
     # the Data headers hold the Total Sellable/Non-Sellable stock columns, which the parser now reports as ignored
     ignored = "Stock columns in the Data sheet are ignored; stock comes from the PDG Stock List and PG Expiry Check files."
-    parsed_messages = [ignored, *expected]
+    # ...and the MOQ / Lead Time columns, which now come from supplier settings
+    settings_ignored = "MOQ and Lead Time columns in the Data sheet are ignored; they come from Supplier settings."
+    parsed_messages = [ignored, settings_ignored, *expected]
     inspected = client.post("/api/inspect", files=files(data, sales)).json()
     # inspect = Data warnings, then the stock reports' merge warnings (the fixture's stock sheets have none of F1's codes)
     stock_messages = [

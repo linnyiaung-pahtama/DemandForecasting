@@ -87,3 +87,10 @@ def make_pdg_workbook(rows: list[list], headers: list[str] = PDG_HEADERS,
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def holding_settings(holdings: dict, moq: float = 0, lead: int | None = None) -> dict:
+    """Supplier settings for tests that only care about holding: {supplier: months} -> SupplierSettings."""
+    from app.models import SupplierSettings
+    return {s: SupplierSettings(supplier=s, holding_months=h, moq=moq, lead_time_days=lead)
+            for s, h in holdings.items()}
