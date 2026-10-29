@@ -74,7 +74,9 @@ function PlanView({ runId }: { runId: number }) {
 
   const selectedWarnings = useMemo(() => {
     if (!run || !selected) return []
-    return [...run.parsed.warnings, ...run.actual.warnings].filter((w) => w.sap_code === selected)
+    return [...run.parsed.warnings, ...run.actual.warnings, ...(run.stock?.warnings ?? [])].filter(
+      (w) => w.sap_code === selected,
+    )
   }, [run, selected])
 
   async function onRecalculate() {
@@ -127,6 +129,7 @@ function PlanView({ runId }: { runId: number }) {
           <h2>Order plan</h2>
           <div className="muted">
             Plan date {fmtDate(result.plan_date)} · {run.file_name} + {run.sales_file_name}
+            {run.pg_file_name !== null && run.pdg_file_name !== null && ` + ${run.pg_file_name} + ${run.pdg_file_name}`}
           </div>
         </div>
         <div className="plan-actions">
@@ -155,7 +158,11 @@ function PlanView({ runId }: { runId: number }) {
         </div>
       )}
 
-      <WarningsPanel dataWarnings={run.parsed.warnings} salesWarnings={run.actual.warnings} />
+      <WarningsPanel
+        dataWarnings={run.parsed.warnings}
+        salesWarnings={run.actual.warnings}
+        stockWarnings={run.stock?.warnings ?? []}
+      />
 
       <div className="cards">
         {CARDS.map((c) => (

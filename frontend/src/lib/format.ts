@@ -87,7 +87,11 @@ export function orderExplanation(r: SkuResult, planDate: string): string[] {
   const lines = [
     `Buffer = (${valid.map(fmtExact).join(' + ')}) ÷ ${r.valid_count} = ${fmtExact(r.buffer)} a month`,
   ]
-  const available = `Available = ${fmtExact(r.sellable)} sellable + ${fmtExact(r.sit)} SIT = ${fmtExact(r.available)}`
+  // Runs saved before the stock reports have no PG/PDG breakdown: they keep the single sellable figure.
+  const available =
+    r.pg_sellable !== null && r.pdg_sellable !== null
+      ? `Available = ${fmtExact(r.pg_sellable)} PG sellable + ${fmtExact(r.pdg_sellable)} PDG sellable + ${fmtExact(r.sit)} SIT = ${fmtExact(r.available)}`
+      : `Available = ${fmtExact(r.sellable)} sellable + ${fmtExact(r.sit)} SIT = ${fmtExact(r.available)}`
 
   if (r.holding_months === null || r.target === null || r.required === null) {
     lines.push(holdingNotSet, available)

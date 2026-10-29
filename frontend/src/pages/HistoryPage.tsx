@@ -45,6 +45,8 @@ export default function HistoryPage() {
                 <th>Created</th>
                 <th>Data file</th>
                 <th>Sales export</th>
+                <th>PG Expiry Check</th>
+                <th>PDG Stock List</th>
                 <th>Plan date</th>
                 <th className="num">SKUs</th>
               </tr>
@@ -62,6 +64,8 @@ export default function HistoryPage() {
                     <Link to={`/runs/${r.id}`}>{r.file_name}</Link>
                   </td>
                   <td>{r.sales_file_name}</td>
+                  <td>{r.pg_file_name ?? '—'}</td>
+                  <td>{r.pdg_file_name ?? '—'}</td>
                   <td>{fmtDate(r.plan_date)}</td>
                   <td className="num">{r.sku_count}</td>
                 </tr>

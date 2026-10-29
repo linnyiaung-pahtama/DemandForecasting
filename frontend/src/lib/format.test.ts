@@ -89,6 +89,11 @@ describe('orderExplanation', () => {
     ])
   })
 
+  it('splits the available line into PG and PDG sellable when the breakdown is stored', () => {
+    const r: SkuResult = { ...worked, pg_sellable: 150, pdg_sellable: 50 }
+    expect(orderExplanation(r, '2026-10-14')).toContain('Available = 150 PG sellable + 50 PDG sellable + 60 SIT = 260')
+  })
+
   it('leaves skipped values out of the sum and divides by the valid count', () => {
     const r: SkuResult = {
       ...worked,

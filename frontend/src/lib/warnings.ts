@@ -1,6 +1,6 @@
 import type { ParseWarning } from '../types'
 
-export type WarningSource = 'Data file' | 'Sales export'
+export type WarningSource = 'Data file' | 'Sales export' | 'Stock files'
 
 export interface SourcedWarning {
   source: WarningSource
@@ -13,10 +13,15 @@ export interface GroupedWarnings {
 }
 
 /** Split a run's warnings into file-level and per-SKU ones, each labelled with the file it came from. */
-export function groupWarnings(dataWarnings: ParseWarning[], salesWarnings: ParseWarning[]): GroupedWarnings {
+export function groupWarnings(
+  dataWarnings: ParseWarning[],
+  salesWarnings: ParseWarning[],
+  stockWarnings: ParseWarning[] = [],
+): GroupedWarnings {
   const all: SourcedWarning[] = [
     ...dataWarnings.map((warning) => ({ source: 'Data file' as const, warning })),
     ...salesWarnings.map((warning) => ({ source: 'Sales export' as const, warning })),
+    ...stockWarnings.map((warning) => ({ source: 'Stock files' as const, warning })),
   ]
   return {
     fileLevel: all.filter((x) => x.warning.sap_code === null),

@@ -4,11 +4,12 @@ import type { ParseWarning } from '../types'
 interface Props {
   dataWarnings: ParseWarning[]
   salesWarnings: ParseWarning[]
+  stockWarnings: ParseWarning[]
 }
 
 /** File-level warnings are shown in full above the plan; per-SKU ones are counted in a collapsible list. */
-export default function WarningsPanel({ dataWarnings, salesWarnings }: Props) {
-  const { fileLevel, perSku } = groupWarnings(dataWarnings, salesWarnings)
+export default function WarningsPanel({ dataWarnings, salesWarnings, stockWarnings }: Props) {
+  const { fileLevel, perSku } = groupWarnings(dataWarnings, salesWarnings, stockWarnings)
   if (fileLevel.length === 0 && perSku.length === 0) return null
 
   return (

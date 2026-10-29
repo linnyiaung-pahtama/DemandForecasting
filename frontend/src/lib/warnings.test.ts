@@ -25,6 +25,27 @@ describe('groupWarnings', () => {
     ])
   })
 
+  it('puts stock warnings after the data and sales ones, labelled "Stock files"', () => {
+    const g = groupWarnings(
+      [w(null, 'data note')],
+      [w(null, 'sales note')],
+      [w(null, 'PG Expiry Check: 32 stock codes are not in the Data sheet; ignored'), w('A1', 'negative stock')],
+    )
+    expect(g.fileLevel.map((x) => [x.source, x.warning.message])).toEqual([
+      ['Data file', 'data note'],
+      ['Sales export', 'sales note'],
+      ['Stock files', 'PG Expiry Check: 32 stock codes are not in the Data sheet; ignored'],
+    ])
+    expect(g.perSku.map((x) => [x.source, x.warning.sap_code])).toEqual([['Stock files', 'A1']])
+  })
+
+  it('still works with two arguments', () => {
+    expect(groupWarnings([w(null, 'a')], [w('A1', 'b')])).toEqual({
+      fileLevel: [{ source: 'Data file', warning: w(null, 'a') }],
+      perSku: [{ source: 'Sales export', warning: w('A1', 'b') }],
+    })
+  })
+
   it('returns empty groups when there are no warnings', () => {
     expect(groupWarnings([], [])).toEqual({ fileLevel: [], perSku: [] })
   })

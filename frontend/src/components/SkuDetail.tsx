@@ -48,6 +48,14 @@ export default function SkuDetail({ sku, planDate, warnings, onClose }: Props) {
           <dt>Packing size</dt>
           <dd>{sku.packing_size === null ? '—' : fmtQty(sku.packing_size)}</dd>
         </div>
+        {sku.pg_non_sellable !== null && sku.pdg_non_sellable !== null && (
+          <div>
+            <dt>Non-sellable</dt>
+            <dd>
+              PG {fmtExact(sku.pg_non_sellable)} · PDG {fmtExact(sku.pdg_non_sellable)}
+            </dd>
+          </div>
+        )}
       </dl>
 
       {sku.zero_forecast && (
