@@ -256,7 +256,7 @@ function PlanView({ runId }: { runId: number }) {
                     <th colSpan={result.actual_months.length} className="group group-start">Actual sales</th>
                     <th colSpan={result.forecast_months.length} className="group group-start">Sales forecast</th>
                     <th colSpan={3} className="group group-start">Stock</th>
-                    <th colSpan={result.plan_months.length} className="group group-start">Orders by month</th>
+                    <th colSpan={result.plan_months.length} className="group group-start">Order demand forecast</th>
                     <th rowSpan={2} className="num group-start">Total</th>
                     <th rowSpan={2}>Status</th>
                   </tr>

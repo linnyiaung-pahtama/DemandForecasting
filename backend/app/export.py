@@ -96,7 +96,7 @@ def build_export(run: RunRecord) -> bytes:
                             *orders, total, sku.status.value])
     _write_sheet(wb.create_sheet("12-Month Plan"),
                  ["Principal", "SAP Code", "Description", "MOQ", "Holding (months)", "Lead Time (days)",
-                  *month_headers, "Buffer", "Available", "Target", *[f"{h} Order" for h in plan_headers],
+                  *month_headers, "Buffer", "Available", "Target", *[f"{h} Order Demand Forecast" for h in plan_headers],
                   "12-Month Total", "Status"], twelve_rows,
                  {name: TWO_DECIMALS for name in [*month_headers, "Buffer", "Available", "Target"]})
 

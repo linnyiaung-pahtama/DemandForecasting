@@ -201,7 +201,7 @@ def test_twelve_month_sheet():
     ws = wb["12-Month Plan"]
     header = [c.value for c in ws[1]]
     assert header == [*PLAN_SETTINGS_HEADERS, *SALES_HEADERS, *STOCK_HEADERS,
-                      *[f"{m} Order" for m in MONTH_HEADERS], "12-Month Total", "Status"]
+                      *[f"{m} Order Demand Forecast" for m in MONTH_HEADERS], "12-Month Total", "Status"]
     rows = {r[1]: r for r in ws.iter_rows(min_row=2, values_only=True)}
     sku = next(s for s in run.result.skus if s.sap_code == "3102111001")
     row = rows["3102111001"]

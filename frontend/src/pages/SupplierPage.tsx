@@ -192,7 +192,7 @@ function SupplierView({ runId }: { runId: number }) {
           </table>
           <p className="muted">Expand a principal to see the SKUs on its purchase order.</p>
 
-          <h2 className="section-head">12-month orders</h2>
+          <h2 className="section-head">12-month order demand forecast</h2>
           {run.result.plan_months.length === 0 ? (
             <p className="muted">Recalculate to see the 12-month plan.</p>
           ) : (
