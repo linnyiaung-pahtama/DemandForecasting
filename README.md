@@ -51,11 +51,11 @@ Then open http://localhost:5173. The frontend forwards `/api` requests to the ba
 ## Using it
 
 1. **New plan**: choose the four files (the Data file, the sales export, the PG Expiry Check and the PDG Stock List), check the detected months, the stock facts (SKUs with stock, sellable cartons from PG and from PDG, the PDG printed date and the PG as-of date), the plan date and any warnings, then click Calculate. Calculate is enabled once all four files inspect OK.
-2. **Order plan**: count cards (To order, Holding not set, No demand data, Zero forecast), a banner listing blocked principals, and filters for principal, status, the Zero forecast flag and search. A warnings panel above the table shows file-level warnings (labelled Data file, Sales export or Stock files; the stock report's name is in the message text) in full and counts the per-SKU warnings in a collapsible list. The plan header lists the four file names. The table has one row per SKU, in column groups: principal settings (MOQ, holding, lead time), the 3 actual sales months, the 3 sales forecast months (months not counted in the buffer are greyed), stock (buffer, available, target), the order demand forecast for each of the 12 months, the 12-month total and the status. Principal, SAP code and description stay on the left while the table scrolls sideways. Click a SKU to see its six demand values, its stock (available = PG sellable + PDG sellable + SIT, with non-sellable PG / PDG shown for information) and the arithmetic behind its order. The principal summary is reached from this page.
-3. **Principal summary**: per principal, the holding, MOQ and lead time the plan used, SKU counts, total order cartons and blocked / no-demand SKUs. Expand a principal for the list of SKUs to put on one purchase order.
-4. **Principal settings**: Holding (months), MOQ (cartons) and Lead time (days) per principal, plus the change log (the newest 200 entries, newest first, one line per changed setting). Saving recalculates the latest run.
+2. **Order plan**: a switch between **Order plan** (the default) and **Order demand forecast** decides which plan every order figure on the page comes from (see [Order plan and order cycle](#order-plan-and-order-cycle)); it is kept in the address (`?mode=forecast`) and carries over to the Principal summary. Count cards (To order, Holding not set, No demand data, Zero forecast), a banner listing blocked principals, and filters for principal, status, the Zero forecast flag and search. A warnings panel above the table shows file-level warnings (labelled Data file, Sales export or Stock files; the stock report's name is in the message text) in full and counts the per-SKU warnings in a collapsible list. The plan header lists the four file names. The table has one row per SKU, in column groups: principal settings (MOQ, holding, lead time, order cycle), the 3 actual sales months, the 3 sales forecast months (months not counted in the buffer are greyed), stock (buffer, available, target), the order for each of the 12 months in the chosen mode (a "·" marks an order-plan month between orders), the 12-month total and the status. Principal, SAP code and description stay on the left while the table scrolls sideways. Click a SKU to see its six demand values, its stock (available = PG sellable + PDG sellable + SIT, with non-sellable PG / PDG shown for information) and the arithmetic behind its order. The principal summary is reached from this page.
+3. **Principal summary**: the same switch; per principal, the holding, MOQ, lead time and order cycle the plan used, SKU counts, this month's total order cartons in the chosen mode and blocked / no-demand SKUs. Expand a principal for the list of SKUs to put on this month's purchase order. Below it, each principal's order total for each of the 12 months.
+4. **Principal settings**: Holding (months), MOQ (cartons), Lead time (days) and Order cycle (months) per principal, plus the change log (the newest 200 entries, newest first, one line per changed setting). Saving recalculates the latest run.
 5. **History**: reopen a past run exactly as it was calculated. Each run lists its file names (runs saved before the stock uploads show "—" for the two stock files).
-6. **Export**: Excel download with five sheets: SKU Plan (with PG Sellable, PDG Sellable, PG Non-Sellable and PDG Non-Sellable columns next to Available), 12-Month Plan (the same columns as the plan page), Principal Summary, Settings Used and Warnings.
+6. **Export**: Excel download with six sheets: SKU Plan (the order demand forecast's this-month figures, with PG Sellable, PDG Sellable, PG Non-Sellable and PDG Non-Sellable columns next to Available), 12-Month Plan and Order Plan (the plan page's columns, one sheet per mode), Principal Summary (both modes' this-month totals and monthly totals), Settings Used and Warnings. Every sheet with principal settings has an "Order Cycle (months)" column.
 
 ## The four uploads
 
@@ -188,6 +188,22 @@ With the worked example above (buffer 120, holding 3, available 260, MOQ 150) th
 
 Plans saved before the 12-month plan existed show "Recalculate to see the 12-month plan" until they are recalculated. No database upgrade is needed.
 
+## Order plan and order cycle
+
+The 12-month plan above is the **order demand forecast**: it tops stock up every month. The **order plan** follows each principal's **order cycle** instead: with cycle 3 the principal is ordered from once every three months, and each order covers the months until the next one. The forecast is unchanged; the switch on the plan page and the Principal summary chooses which one the order figures come from.
+
+- **Order months:** the plan's first month (the MTD month) and every *cycle* months after it. With cycle 3 that is Oct, Jan, Apr and Jul for the current file. For now every principal's cycle starts in the first month; later, with order history from the database, it can start per principal.
+- **In an order month** the order tops stock up to the **order-up-to level = buffer × (holding + cycle − 1)**, minus the opening stock, rounded up to whole cartons and raised to the MOQ as usual. So stock never starts a month below the holding until the next order arrives.
+- **In the months between** nothing is ordered ("·" on screen, blank in Excel) and stock runs down by one month's demand.
+- **Cycle 1** gives exactly the order demand forecast. **Holding not set:** "—" every month. **No demand data:** 0 every month.
+- **This month's order, status and counts** follow the switch: in Order plan mode they are the order plan's month 1, so a SKU can be "No order needed" in the forecast (stock above the target) but "To order" in the order plan (stock below the order-up-to level). The Principal summary's purchase-order lines and totals and the SKU detail's arithmetic ("Order-up-to = …") follow it too.
+
+Small example (buffer 120, holding 3, available 260, MOQ 0, cycle 3, so the order-up-to level is 120 × 5 = 600): Oct orders 340, Nov and Dec nothing, Jan orders 360 (stock is 240 by then), and every three months after that 360.
+
+Real example (Phwer Htwe, buffer ≈ 6,975.6, holding 2, available ≈ 7,784.7, MOQ 0, cycle 3, so the order-up-to level ≈ 27,902.4): Oct orders 20,118, then Jan, Apr and Jul 20,927 each. The 12-month total is 82,899, the same as the order demand forecast; only the timing differs. With an MOQ the totals can differ.
+
+Plans saved before the order cycle existed show "Recalculate to see the order plan" in Order plan mode; the order demand forecast still shows.
+
 ## Statuses and flags
 
 | Status | Meaning |
@@ -205,6 +221,7 @@ Plans saved before the 12-month plan existed show "Recalculate to see the 12-mon
 - A blank value means not set. There is no default: a principal with no holding is blocked (status Holding not set) until you enter one.
 - **MOQ (cartons)** per principal: a whole number, 0 or more (default 0 = no minimum). Any SKU of the principal whose order is above 0 but below the MOQ is raised to the MOQ; it is not a minimum on the principal's total order. "8,000" with a thousands separator is accepted.
 - **Lead time (days)** per principal: a whole number from 0 to 365, or blank. It only sets the next calculation date; a blank lead time shows "Lead time not set — no next calculation date" and does not block anything.
+- **Order cycle (months)** per principal: a whole number from 1 to 12 (default 1 = order every month). It cannot be blank. See [Order plan and order cycle](#order-plan-and-order-cycle).
 - Every change is recorded in the change log, one line per changed setting: principal, setting, old value, new value and time (newest first). There is no user name, because the tool is single-user.
 - Saving sends only the changed rows and recalculates the latest run. The Order plan page also has a Recalculate button. Recalculating any plan, including an older one, uses the current settings.
 
@@ -229,6 +246,8 @@ The `$env:` setting applies only to the current PowerShell window. The `backend`
 - The upgrade does not recalculate any saved run. Until you recalculate it (or save settings), an older plan stays exactly as it was and shows "Saved before MOQ and lead time moved to Principal settings — Recalculate to use the current settings."
 
 To keep the v3 file, copy `backend/data/orderplan.db` to `orderplan.pre-v4-backup.db` before restarting the backend.
+
+**Upgrading to v5 (order cycle).** A v4 database is upgraded in place the first time the new backend starts: `supplier_settings` gains an order cycle column, every principal starts at 1, and the schema version moves to 5. Nothing is written to the change log and no saved run is recalculated; an older plan shows its order demand forecast as before and "Recalculate to see the order plan" in Order plan mode. To keep the v4 file, copy `backend/data/orderplan.db` to `orderplan.pre-v5-backup.db` before restarting the backend.
 
 ## Tests
 
