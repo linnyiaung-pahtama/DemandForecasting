@@ -116,6 +116,7 @@ describe('orderExplanation', () => {
       moq_applied: false,
       order_qty: 100,
       order_cycle_months: 3,
+      order_plan: [],
       plan_order_up_to: 600,
       plan_required: 340,
       plan_order_qty: 340,
@@ -132,11 +133,17 @@ describe('orderExplanation', () => {
     expect(orderExplanation(r, '2026-10-14')).toEqual(orderExplanation(r, '2026-10-14', 'forecast'))
   })
 
+  it('asks for a recalculation, not "holding not set", when an older run has no order plan', () => {
+    // worked has holding 3 but no order plan (order_plan and plan_* are null): saved before the order cycle
+    expect(orderExplanation(worked, '2026-10-14', 'plan')).toEqual(['Recalculate to see the order plan.'])
+  })
+
   it('uses the order plan MOQ check in plan mode', () => {
     const r: SkuResult = {
       ...worked,
       moq: 500,
       order_cycle_months: 3,
+      order_plan: [],
       plan_order_up_to: 600,
       plan_required: 340,
       plan_order_qty: 500,

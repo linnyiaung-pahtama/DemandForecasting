@@ -14,6 +14,8 @@ interface Props {
 export default function SkuDetail({ sku, planDate, mode, warnings, onClose }: Props) {
   const view = skuView(sku, mode)
   const cycle = sku.order_cycle_months
+  // An older run has no order plan: say so rather than show blanks next to the forecast's status.
+  const noPlan = mode === 'plan' && sku.order_plan === null
   return (
     <aside className="detail" aria-label={`Details for ${sku.sap_code}`}>
       <div className="detail-head">
@@ -22,20 +24,26 @@ export default function SkuDetail({ sku, planDate, mode, warnings, onClose }: Pr
             {sku.sap_code} · {sku.description}
           </h2>
           <div className="muted">{sku.supplier}</div>
-          <div>
-            <StatusChip status={view.status} zeroForecast={sku.zero_forecast} />
-          </div>
+          {!noPlan && (
+            <div>
+              <StatusChip status={view.status} zeroForecast={sku.zero_forecast} />
+            </div>
+          )}
         </div>
         <button onClick={onClose} aria-label="Close details">
           Close
         </button>
       </div>
 
+      {noPlan && <div className="alert warn">Recalculate to see the order plan.</div>}
+
       <dl className="facts">
-        <div>
-          <dt>Order qty</dt>
-          <dd>{view.orderQty === null ? '—' : `${fmtQty(view.orderQty)} cartons`}</dd>
-        </div>
+        {!noPlan && (
+          <div>
+            <dt>Order qty</dt>
+            <dd>{view.orderQty === null ? '—' : `${fmtQty(view.orderQty)} cartons`}</dd>
+          </div>
+        )}
         <div>
           <dt>Holding</dt>
           <dd>{sku.holding_months === null ? 'Not set' : `${fmtMonths(sku.holding_months)} months`}</dd>

@@ -75,6 +75,8 @@ function plural(n: number, unit: string): string {
  * planner can follow the arithmetic. `planDate` is the plan's date (ISO), used for the last line.
  */
 export function orderExplanation(r: SkuResult, planDate: string, mode: PlanMode = 'forecast'): string[] {
+  // A plan saved before the order cycle has no order plan to explain; its holding may well be set.
+  if (mode === 'plan' && r.order_plan === null) return ['Recalculate to see the order plan.']
   const monthCount = r.demand_values.length
   const holdingNotSet = `Holding not set for ${r.supplier} — no order calculated`
   const valid = r.demand_values.filter((d) => d.valid && d.value !== null).map((d) => d.value as number)
