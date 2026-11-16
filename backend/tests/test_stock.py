@@ -167,7 +167,8 @@ def test_stock_files_override_data_sheet_stock():
     raw = make_workbook([["A1", "Sup", "X", 12, 0, 6, 7, 999, 0, 0, 5] + [10] * 12])   # old-style Data row
     parsed = parse_input(raw)
     assert parsed.skus[0].sellable == 0
-    message = "Stock columns in the Data sheet are ignored; stock comes from the PDG Stock List and PG Expiry Check files."
+    message = ("Stock and SIT columns in the Data sheet are ignored; stock comes from the PDG Stock List and PG Expiry "
+               "Check files, and stock in transit from the Stock in Transit file.")
     assert [w.message for w in parsed.warnings].count(message) == 1
     assert next(w for w in parsed.warnings if w.message == message).sap_code is None
     out, _ = apply_stock(parsed, _pg(("A1", True, 5)), _pdg())

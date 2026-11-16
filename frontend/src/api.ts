@@ -1,4 +1,5 @@
 import type {
+  Commit,
   InspectResponse,
   RunListItem,
   RunRecord,
@@ -73,6 +74,7 @@ export interface UploadFiles {
   sales: File
   pg: File
   pdg: File
+  sit: File
 }
 
 function filesForm(files: UploadFiles): FormData {
@@ -81,6 +83,7 @@ function filesForm(files: UploadFiles): FormData {
   form.append('sales_file', files.sales)
   form.append('pg_file', files.pg)
   form.append('pdg_file', files.pdg)
+  form.append('sit_file', files.sit)
   return form
 }
 
@@ -88,10 +91,20 @@ export function inspectFiles(files: UploadFiles): Promise<InspectResponse> {
   return request<InspectResponse>('/api/inspect', { method: 'POST', body: filesForm(files) })
 }
 
-export function createRun(files: UploadFiles, planDate?: string): Promise<RunRecord> {
+export function createRun(files: UploadFiles, planDate?: string, commits: Commit[] = []): Promise<RunRecord> {
   const form = filesForm(files)
   if (planDate) form.append('plan_date', planDate)
+  if (commits.length > 0) form.append('commits', JSON.stringify(commits))
   return request<RunRecord>('/api/runs', { method: 'POST', body: form })
+}
+
+/** Replace a calculated plan's commits; the plan is recalculated in place with the current settings. */
+export function saveCommits(runId: number, commits: Commit[]): Promise<RunRecord> {
+  return request<RunRecord>(`/api/runs/${runId}/commits`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(commits),
+  })
 }
 
 export function getRun(id: number): Promise<RunRecord> {

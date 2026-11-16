@@ -3,8 +3,9 @@ import calendar
 import math
 from datetime import date, timedelta
 
-from app.models import (ActualSales, DemandValue, HoldingPlan, MonthPlan, ParsedInput, SkuInput, SkuResult,
-                        SkuStatus, SupplierSettings)
+from app.models import (DAYS_PER_MONTH, DEFAULT_ORDER_CYCLE_WEEKS, ActualSales, DemandValue, HoldingPlan, MonthPlan, OrderLine,
+                        ParsedInput, SkuInput, SkuResult, SkuStatus, SupplierSettings)
+from app.cities import CITIES
 from app.months import next_months
 
 EPS = 1e-9
@@ -27,8 +28,8 @@ def _raise_to_moq(required: int, moq: float) -> tuple[int, bool]:
     return required, False
 
 
-def _status(holding_months: float | None, valid_count: int, order: int | None) -> SkuStatus:
-    if holding_months is None:
+def _status(holding_days: float | None, valid_count: int, order: int | None) -> SkuStatus:
+    if holding_days is None:
         return SkuStatus.HOLDING_NOT_SET
     if valid_count == 0:
         return SkuStatus.NO_DEMAND_DATA
@@ -36,30 +37,32 @@ def _status(holding_months: float | None, valid_count: int, order: int | None) -
 
 
 def plan_sku(sku: SkuInput, actuals: dict[str, float], actual_months: list[str],
-             forecast_months: list[str], holding_months: float | None,
+             forecast_months: list[str], holding_days: float | None,
              plan_date: date, moq: float = 0.0, lead_time_days: int | None = None) -> SkuResult:
     """Plan one SKU. MOQ and lead time are the supplier's settings; the SKU's own (old Data sheet)
-    moq / lead_time_days fields are never read."""
+    moq / lead_time_days fields are never read. The buffer is average monthly sales / 30 x holding days, in
+    cartons, and the order demand forecast tops stock up to it (the target)."""
     demand_values = [DemandValue(month=m, source="actual", value=actuals.get(m),
                                  valid=_is_valid(actuals.get(m))) for m in actual_months]
     demand_values += [DemandValue(month=m, source="forecast", value=sku.forecast.get(m),
                                   valid=_is_valid(sku.forecast.get(m))) for m in forecast_months]
     valid = [d.value for d in demand_values if d.valid]
     valid_count = len(valid)
-    buffer = sum(valid) / valid_count if valid_count else None
+    avg_sales = sum(valid) / valid_count if valid_count else None
     zero_forecast = (any(d.valid for d in demand_values if d.source == "actual")
                      and not any(d.valid for d in demand_values if d.source == "forecast"))
 
     available = sku.sellable + sku.sit
-    stock_cover = available / buffer if buffer and available >= 0 else None
+    stock_cover = available / avg_sales if avg_sales and available >= 0 else None
 
-    target = required = order_qty = None
+    buffer = target = required = order_qty = None
     moq_applied = False
-    if holding_months is not None:
-        target = (buffer or 0.0) * holding_months
+    if holding_days is not None:
+        buffer = (avg_sales or 0.0) / DAYS_PER_MONTH * holding_days
+        target = buffer
         required = _required(target, available, valid_count)
         order_qty, moq_applied = _raise_to_moq(required, moq)
-    status = _status(holding_months, valid_count, order_qty)
+    status = _status(holding_days, valid_count, order_qty)
 
     lead = lead_time_days
     next_calc_date = None
@@ -75,62 +78,181 @@ def plan_sku(sku: SkuInput, actuals: dict[str, float], actual_months: list[str],
         sit=sku.sit, available=available, pg_sellable=sku.pg_sellable, pdg_sellable=sku.pdg_sellable,
         pg_non_sellable=sku.pg_non_sellable, pdg_non_sellable=sku.pdg_non_sellable,
         demand_values=demand_values, valid_count=valid_count,
-        buffer=buffer, holding_months=holding_months, target=target, required=required,
+        avg_sales=avg_sales, buffer=buffer, holding_days=holding_days, target=target, required=required,
         order_qty=order_qty, moq_applied=moq_applied, stock_cover_months=stock_cover,
-        next_calc_date=next_calc_date, status=status, zero_forecast=zero_forecast)
+        next_calc_date=next_calc_date, status=status, zero_forecast=zero_forecast, sit_arrivals=sku.sit_arrivals)
 
 
 PLAN_MONTHS = 12
 
 
 def monthly_demand(sku: SkuResult, months: list[str]) -> dict[str, float]:
-    """Demand per month for the 12-month plan. For now every month is the buffer (0 with no demand data);
-    this is the one place a monthly forecast from the database would plug in."""
-    return {m: sku.buffer or 0.0 for m in months}
+    """Demand per month for the 12-month plan. For now every month is the average monthly sales (0 with no demand
+    data); this is the one place a monthly forecast from the database would plug in."""
+    return {m: sku.avg_sales or 0.0 for m in months}
 
 
-def order_up_to(sku: SkuResult, cycle: int) -> float | None:
-    """The stock an order month tops up to: enough that no month until the next order starts below the
-    holding, i.e. buffer × (holding + cycle − 1). Cycle 1 gives the target. None when holding is not set."""
-    if sku.holding_months is None:
-        return None
-    return (sku.buffer or 0.0) * (sku.holding_months + cycle - 1)
-
-
-def roll_forward(sku: SkuResult, months: list[str], cycle: int = 1) -> list[MonthPlan]:
-    """Order every `cycle` months, starting with month 1, topping stock up to `order_up_to` (raised to MOQ);
-    order nothing in the months between. Cycle 1 is the order demand forecast: every month tops stock back
-    up to the target, and month 1 is the SKU's planned order. Orders arrive within the month they are placed."""
+def roll_forward(sku: SkuResult, months: list[str]) -> list[MonthPlan]:
+    """The order demand forecast: every month tops stock back up to the target (raised to MOQ), and month 1
+    is the SKU's planned order. Orders arrive within the month they are placed."""
     demand = monthly_demand(sku, months)
-    level = order_up_to(sku, cycle)
     plan: list[MonthPlan] = []
     opening = sku.available
-    for i, month in enumerate(months):
-        order_month = i % cycle == 0
+    for month in months:
         moq_applied = False
-        if level is None:
+        if sku.target is None:
             order = None
-        elif not order_month:
-            order = 0
         else:
-            order, moq_applied = _raise_to_moq(_required(level, opening, sku.valid_count), sku.moq)
+            order, moq_applied = _raise_to_moq(_required(sku.target, opening, sku.valid_count), sku.moq)
         closing = opening + (order or 0) - demand[month]
         plan.append(MonthPlan(month=month, opening=opening, demand=demand[month], order=order,
-                              moq_applied=moq_applied, closing=closing, order_month=order_month))
+                              moq_applied=moq_applied, closing=closing))
         opening = closing
     return plan
 
 
-def _attach_order_plan(result: SkuResult, months: list[str], cycle: int) -> None:
-    """The order plan and its this-month values, next to the forecast-mode ones."""
-    result.order_cycle_months = cycle
-    result.order_plan = roll_forward(result, months, cycle)
-    result.plan_order_up_to = order_up_to(result, cycle)
+def order_up_to(sku: SkuResult, cycle_weeks: int) -> float | None:
+    """The stock each order tops up to: buffer + average monthly sales × (cycle × 12 ÷ 52 − 1), so just before the
+    next order stock is down to the buffer less one month's sales, as with monthly ordering. Never below one
+    cycle's sales (average × cycle × 12 ÷ 52), so a holding under 30 days still orders every cycle. None when
+    holding is not set."""
+    if sku.buffer is None:
+        return None
+    cycle_sales = (sku.avg_sales or 0.0) * cycle_weeks * 12 / 52
+    return max(sku.buffer - (sku.avg_sales or 0.0) + cycle_sales, cycle_sales)
+
+
+def _days_in(month: str) -> int:
+    year, mon = map(int, month.split("-"))
+    return calendar.monthrange(year, mon)[1]
+
+
+def order_dates(plan_date: date, months: list[str], cycle_weeks: int) -> list[date]:
+    """The plan date, then every `cycle_weeks` weeks after it, up to the last day of the last plan month."""
+    year, mon = map(int, months[-1].split("-"))
+    end = date(year, mon, _days_in(months[-1]))
+    dates, day = [], plan_date
+    while day <= end:
+        dates.append(day)
+        day += timedelta(weeks=cycle_weeks)
+    return dates
+
+
+def arrival_days(sku: SkuResult, plan_date: date) -> list[tuple[date, float]]:
+    """The SKU's SIT by the day it lands, sorted: an arrival dated before the plan date lands on the plan date. A run
+    saved before the Stock in Transit file (no arrivals) has all its SIT landing on the plan date."""
+    if sku.sit_arrivals is None:
+        return [(plan_date, sku.sit)] if sku.sit else []
+    by_day: dict[date, float] = {}
+    for a in sku.sit_arrivals:
+        day = max(a.date, plan_date)
+        by_day[day] = by_day.get(day, 0.0) + a.cartons
+    return sorted(by_day.items())
+
+
+def _daily_demand(sku: SkuResult, months: list[str]):
+    """day -> that day's demand: its month's demand ÷ the month's days (0 outside the plan months)."""
+    demand = monthly_demand(sku, months)
+
+    def daily(day: date) -> float:
+        month = f"{day.year:04d}-{day.month:02d}"
+        return demand.get(month, 0.0) / _days_in(month)
+    return daily
+
+
+def weekly_order_plan(sku: SkuResult, months: list[str], plan_date: date, cycle_weeks: int) -> list[MonthPlan]:
+    """The order plan: an order on the plan date and every `cycle_weeks` weeks after it, each topping stock up
+    to `order_up_to` (raised to MOQ). Stock on hand is followed day by day from the plan date, starting at sellable:
+    each day its SIT arrivals land, then an order on an order date arrives, then the day's demand (its month's
+    demand ÷ the month's days) is used. Each order counts stock on hand plus the SIT still to arrive, so SIT on its
+    way is never ordered twice and the orders don't depend on when it lands. Each month shows its arrivals, its
+    orders and their total; a month whose days are all before the plan date has no demand and no order."""
+    demand = monthly_demand(sku, months)
+    level = order_up_to(sku, cycle_weeks)
+    planned = order_dates(plan_date, months, cycle_weeks)
+    dates = set(planned)
+    daily = _daily_demand(sku, months)
+    landing = dict(arrival_days(sku, plan_date))
+    pending = sum(landing.values())  # SIT not landed yet
+
+    # The floor in `order_up_to` is one cycle at the average month's rate; February's days use more, so each
+    # order also covers the actual demand until the next order date, and stock never runs below 0 before it.
+    cover = {d: sum(daily(d + timedelta(days=i)) for i in range(7 * cycle_weeks)) for d in planned}
+    stock = sku.sellable
+    plan: list[MonthPlan] = []
+    for month in months:
+        year, mon = map(int, month.split("-"))
+        days = _days_in(month)
+        opening, used, landed, lines, order_month = stock, 0.0, 0.0, [], False
+        for d in range(1, days + 1):
+            day = date(year, mon, d)
+            if day < plan_date:
+                continue
+            if day in landing:
+                stock += landing[day]
+                landed += landing[day]
+                pending -= landing[day]
+            if day in dates:
+                order_month = True
+                if level is not None:
+                    qty, raised = _raise_to_moq(
+                        _required(max(level, cover[day]), stock + pending, sku.valid_count), sku.moq)
+                    lines.append(OrderLine(date=day, qty=qty, moq_applied=raised))
+                    stock += qty
+            stock -= demand[month] / days
+            used += demand[month] / days
+        order = None if level is None else sum(o.qty for o in lines)
+        plan.append(MonthPlan(month=month, opening=opening, demand=used, order=order,
+                              moq_applied=any(o.moq_applied for o in lines),
+                              closing=opening + landed + (order or 0) - used,
+                              order_month=order_month, orders=lines, arrivals=landed))
+        stock = plan[-1].closing
+    return plan
+
+
+def sit_run_out(sku: SkuResult, months: list[str], plan_date: date) -> tuple[date, date] | None:
+    """(the day stock first runs out, the next SIT arrival after it) when sellable stock plus SIT landed so far, with
+    no new orders, falls below 0 before the SKU's last arrival; None otherwise, and always None with no demand data
+    or no SIT. New orders are left out: one placed now can't arrive before SIT already on its way."""
+    arrivals = arrival_days(sku, plan_date)
+    if sku.valid_count == 0 or not arrivals:
+        return None
+    landing = dict(arrivals)
+    last = arrivals[-1][0]
+    daily = _daily_demand(sku, months)
+    stock, day = sku.sellable, plan_date
+    while day < last:
+        stock += landing.get(day, 0.0)
+        stock -= daily(day)
+        if stock < -EPS:
+            return day, next(d for d, _ in arrivals if d > day)
+        day += timedelta(days=1)
+    return None
+
+
+def _attach_order_plan(result: SkuResult, months: list[str], plan_date: date, cycle_weeks: int) -> None:
+    """The order plan and its this-month values, next to the forecast-mode ones. This month's order is the one
+    placed on the plan date."""
+    result.order_cycle_weeks = cycle_weeks
+    result.order_plan = weekly_order_plan(result, months, plan_date, cycle_weeks)
+    result.plan_order_up_to = order_up_to(result, cycle_weeks)
     if result.plan_order_up_to is not None:
         result.plan_required = _required(result.plan_order_up_to, result.available, result.valid_count)
-    result.plan_order_qty = result.order_plan[0].order
-    result.plan_moq_applied = result.order_plan[0].moq_applied
-    result.plan_status = _status(result.holding_months, result.valid_count, result.plan_order_qty)
+    first = next((o for m in result.order_plan for o in m.orders), None)
+    result.plan_order_qty = None if first is None else first.qty
+    result.plan_moq_applied = first is not None and first.moq_applied
+    result.plan_status = _status(result.holding_days, result.valid_count, result.plan_order_qty)
+
+
+def drop_monthly_order_plan(result: HoldingPlan) -> HoldingPlan:
+    """The plan without its order plan when it was saved with a cycle in months (its SKUs carry an order plan
+    but no weekly cycle), so it shows "Recalculate" like a run saved before the order cycle. Otherwise as is."""
+    if not any(s.order_plan is not None and s.order_cycle_weeks is None for s in result.skus):
+        return result
+    cleared = {"order_plan": None, "plan_order_up_to": None, "plan_required": None, "plan_order_qty": None,
+               "plan_moq_applied": False, "plan_status": None}
+    return result.model_copy(update={"skus": [s.model_copy(update=cleared) for s in result.skus],
+                                     "plan_counts": None})
 
 
 def plan_date_bounds(parsed: ParsedInput) -> tuple[date, date]:
@@ -175,23 +297,67 @@ def plan_all(parsed: ParsedInput, actual: ActualSales, settings: dict[str, Suppl
     for s in suppliers:
         stored = settings.get(s)
         used[s] = SupplierSettings(
-            supplier=s, holding_months=stored.holding_months if stored else None,
+            supplier=s, holding_days=stored.holding_days if stored else None,
             moq=(stored.moq or 0.0) if stored else 0.0, lead_time_days=stored.lead_time_days if stored else None,
-            order_cycle_months=(stored.order_cycle_months or 1) if stored else 1)
-    skus = [plan_sku(sku, actual.cartons.get(sku.sap_code, {}), actual_months, forecast_months,
-                     used[sku.supplier].holding_months, plan_date, moq=used[sku.supplier].moq,
-                     lead_time_days=used[sku.supplier].lead_time_days) for sku in parsed.skus]
+            order_cycle_weeks=(stored.order_cycle_weeks or DEFAULT_ORDER_CYCLE_WEEKS) if stored
+            else DEFAULT_ORDER_CYCLE_WEEKS)
+    skus = []
+    for sku, actuals, city in _plan_units(parsed, actual, actual_months, forecast_months):
+        result = plan_sku(sku, actuals, actual_months, forecast_months, used[sku.supplier].holding_days, plan_date,
+                          moq=used[sku.supplier].moq, lead_time_days=used[sku.supplier].lead_time_days)
+        result.city = city
+        skus.append(result)
     plan_months = next_months(parsed.mtd_month, PLAN_MONTHS)
     for result in skus:
         result.monthly = roll_forward(result, plan_months)
-        _attach_order_plan(result, plan_months, used[result.supplier].order_cycle_months)
+        _attach_order_plan(result, plan_months, plan_date, used[result.supplier].order_cycle_weeks)
+        result.runs_out_on, result.runs_out_arrival = sit_run_out(result, plan_months, plan_date) or (None, None)
     return HoldingPlan(
         plan_date=plan_date, actual_months=actual_months, forecast_months=forecast_months,
         plan_months=plan_months,
         skus=skus,
         settings_used=list(used.values()),
-        blocked_suppliers=[s for s in suppliers if used[s].holding_months is None],
+        blocked_suppliers=[s for s in suppliers if used[s].holding_days is None],
         counts=_counts(skus, [r.status for r in skus]), plan_counts=_counts(skus, [r.plan_status for r in skus]))
+
+
+def _city_sku(sku: SkuInput, city: str) -> SkuInput:
+    """The SKU as one city sees it: that city's stock, stock in transit and forecast."""
+    c = sku.cities[city]
+    return sku.model_copy(update={
+        "sellable": c.sellable, "non_sellable": c.non_sellable, "pg_sellable": c.pg_sellable,
+        "pdg_sellable": c.pdg_sellable, "pg_non_sellable": c.pg_non_sellable, "pdg_non_sellable": c.pdg_non_sellable,
+        "sit": c.sit, "sit_arrivals": c.sit_arrivals, "forecast": c.forecast})
+
+
+def _city_active(sku: SkuInput, actuals: dict[str, float], actual_months: list[str],
+                 forecast_months: list[str]) -> bool:
+    """A city gets a plan row when it has something: a sales value above 0 (actual or forecast), stock or SIT."""
+    return (any(_is_valid(actuals.get(m)) for m in actual_months)
+            or any(_is_valid(sku.forecast.get(m)) for m in forecast_months)
+            or sku.sellable != 0 or sku.non_sellable != 0 or sku.sit != 0)
+
+
+def _plan_units(parsed: ParsedInput, actual: ActualSales, actual_months: list[str],
+                forecast_months: list[str]) -> list[tuple[SkuInput, dict[str, float], str | None]]:
+    """(SKU input, its actual cartons, city) for each plan row. A run split by city has a row per city with
+    something in it (a SKU with nothing anywhere keeps its Yangon row); a run saved before the split has one
+    combined row per SKU, city None."""
+    units: list[tuple[SkuInput, dict[str, float], str | None]] = []
+    for sku in parsed.skus:
+        if sku.cities is None or actual.city_cartons is None:
+            units.append((sku, actual.cartons.get(sku.sap_code, {}), None))
+            continue
+        rows = []
+        for city in CITIES:
+            if city not in sku.cities:
+                continue
+            city_sku = _city_sku(sku, city)
+            actuals = actual.city_cartons.get(city, {}).get(sku.sap_code, {})
+            if _city_active(city_sku, actuals, actual_months, forecast_months):
+                rows.append((city_sku, actuals, city))
+        units.extend(rows or [(_city_sku(sku, "YGN"), actual.city_cartons.get("YGN", {}).get(sku.sap_code, {}), "YGN")])
+    return units
 
 
 def _counts(skus: list[SkuResult], statuses: list[SkuStatus]) -> dict[str, int]:

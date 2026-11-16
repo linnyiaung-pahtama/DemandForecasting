@@ -5,11 +5,12 @@ interface Props {
   dataWarnings: ParseWarning[]
   salesWarnings: ParseWarning[]
   stockWarnings: ParseWarning[]
+  sitWarnings?: ParseWarning[] // the Stock in Transit file's warnings and the run-out flags
 }
 
 /** File-level warnings are shown in full above the plan; per-SKU ones are counted in a collapsible list. */
-export default function WarningsPanel({ dataWarnings, salesWarnings, stockWarnings }: Props) {
-  const { fileLevel, perSku } = groupWarnings(dataWarnings, salesWarnings, stockWarnings)
+export default function WarningsPanel({ dataWarnings, salesWarnings, stockWarnings, sitWarnings = [] }: Props) {
+  const { fileLevel, perSku } = groupWarnings(dataWarnings, salesWarnings, stockWarnings, sitWarnings)
   if (fileLevel.length === 0 && perSku.length === 0) return null
 
   return (

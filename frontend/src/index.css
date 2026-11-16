@@ -331,6 +331,81 @@ button.link-button:hover:not(:disabled) {
   color: var(--danger);
 }
 
+/* New plan: the Commit lines (stock agreed with a principal, not yet in the Stock in Transit file). */
+.commits {
+  margin: 1.25rem 0;
+}
+
+.commits h3 {
+  margin: 0 0 0.25rem;
+}
+
+/* Fixed columns so the table fits the card: the SAP code box takes the free width. */
+.commit-table {
+  margin: 0.5rem 0;
+  table-layout: fixed;
+}
+
+.commit-table th,
+.commit-table td {
+  padding-left: 0.4rem;
+  padding-right: 0.4rem;
+}
+
+.commit-table col.c-cartons {
+  width: 7rem;
+}
+
+.commit-table col.c-week {
+  width: 11.5rem;
+}
+
+.commit-table col.c-region {
+  width: 8.5rem;
+}
+
+.commit-table col.c-remove {
+  width: 5.5rem;
+}
+
+.commit-table input,
+.commit-table select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.commit-table td.num input {
+  text-align: right;
+}
+
+/* The picked SKU's description under its code: one line, cut with an ellipsis (full text on hover). */
+.commit-sku {
+  margin-top: 0.2rem;
+  overflow: hidden;
+  font-size: 0.8rem;
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.commit-table td {
+  vertical-align: top;
+}
+
+/* The general link-button cell rule (13rem, for the principal summary) would push Remove out of the card. */
+.commit-table td:has(> button.link-button) {
+  min-width: 0;
+}
+
+.commit-table tbody tr:hover {
+  background: transparent;
+}
+
+/* A commit in the SKU detail's stock in transit list. */
+.commit-tag {
+  margin-left: 0.4rem;
+}
+
 .field-warning,
 .note-default {
   max-width: 32rem;
@@ -374,6 +449,31 @@ button.link-button:hover:not(:disabled) {
 
 .warnings-panel .warnings {
   margin-bottom: 0;
+}
+
+/* The plan page's list of the commits entered on New plan. */
+.commits-panel {
+  margin-bottom: 1.25rem;
+}
+
+.commits-panel > p.muted {
+  margin: 0.4rem 0;
+}
+
+.commits-panel > button {
+  margin-top: 0.5rem;
+}
+
+.commit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+.commit-actions .muted {
+  font-size: 0.85rem;
 }
 
 .badge {
@@ -679,6 +779,13 @@ button.count-card.active:hover {
 }
 
 /* Order plan | Order demand forecast: which plan the order figures come from. */
+/* Order plan | Order demand forecast, and Months | Weeks next to it in Order plan mode. */
+.switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
 .mode-switch {
   display: inline-flex;
   margin-bottom: 1rem;
@@ -775,6 +882,34 @@ td.not-order {
 
 .tag {
   margin-left: 0.4rem;
+}
+
+/* In Weeks view a month heading spans its week columns. */
+.plan-table th.week-month {
+  text-align: center;
+}
+
+/* An order-plan month lists each order with its date underneath ("7 Dec"). */
+.order-line + .order-line {
+  margin-top: 0.35rem;
+}
+
+.order-week {
+  display: block;
+  margin-top: 0.1rem;
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--ink-soft);
+}
+
+/* Stock in transit arriving in a week column: quieter than an order, in italics so it never reads as one. */
+.arrival-line {
+  margin-top: 0.1rem;
+  font-size: 0.72rem;
+  font-style: italic;
+  font-weight: 400;
+  color: var(--ink-soft);
+  white-space: nowrap;
 }
 
 /* ---- SKU detail ------------------------------------------------------------------------- */

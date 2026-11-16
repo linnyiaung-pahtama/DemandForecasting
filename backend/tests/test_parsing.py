@@ -1,13 +1,13 @@
 from datetime import date
 import pytest
 from pathlib import Path
-from app.parsing import parse_input
-from app.models import InputFileError
+from app.parsing import drop_unused_warnings, parse_input
+from app.models import InputFileError, ParseWarning
 from tests.helpers import DEFAULT_HEADERS, make_workbook
 
 SAMPLE = Path(__file__).parent / "fixtures" / "sample_input.xlsx"
-STOCK_COLUMNS_MESSAGE = ("Stock columns in the Data sheet are ignored; "
-                         "stock comes from the PDG Stock List and PG Expiry Check files.")
+STOCK_COLUMNS_MESSAGE = ("Stock and SIT columns in the Data sheet are ignored; stock comes from the PDG Stock List "
+                         "and PG Expiry Check files, and stock in transit from the Stock in Transit file.")
 SETTINGS_COLUMNS_MESSAGE = ("MOQ and Lead Time columns in the Data sheet are ignored; they come from Principal settings.")
 
 def test_parses_sample_file():
@@ -23,16 +23,15 @@ def test_parses_sample_file():
     assert sku.supplier == "MayMyo Fresh Coffee"
     assert sku.lead_time_days is None and sku.packing_size == 30 and sku.shelf_life_months == 12
     assert sku.sellable == 0 and sku.pg_sellable is None   # stock comes from the stock reports
-    assert sku.sit == pytest.approx(41, abs=0.01)
+    assert sku.sit == 0 and sku.sit_arrivals is None   # SIT comes from the Stock in Transit file
     assert sku.forecast["2026-10"] == pytest.approx(128.71, abs=0.01)
 
-def test_sample_warnings_for_zero_shelf_life_and_negative_mtd():
+def test_sample_has_no_shelf_life_or_mtd_warnings():
+    # shelf life and the MTD quantity are not used in the calculation, so their odd values are not warned about
     p = parse_input(SAMPLE.read_bytes())
-    msgs = [w.message for w in p.warnings]
-    assert sum("shelf life 0" in m for m in msgs) == 3
-    assert sum("negative MTD" in m for m in msgs) == 10
-    # '-' shelf life means no expiry: no warning, value None
+    assert not [w for w in p.warnings if w.column in ("Shelf Life month", p.mtd_label)]
     assert sum(1 for s in p.skus if s.shelf_life_months is None) == 46  # 43 '-' + 3 zero
+    assert sum(1 for s in p.skus if s.mtd_sales < 0) == 10  # the raw value is kept
 
 def test_detects_columns_by_pattern_in_next_cycle_file():
     headers = ["SAP Code","By Principal","Description","Packing Size","MOQ","Shelf Life month",
@@ -53,16 +52,16 @@ def test_numeric_sap_code_has_no_decimal():
     assert parse_input(data).skus[0].sap_code == "127902330249"
 
 def test_blank_and_text_numbers_become_zero_with_warning():
-    data = make_workbook([["1001","Honesty","X",12,0,6,14,None,0,"n/a",5] + [10]*12])
+    data = make_workbook([["1001","Honesty","X",12,0,6,14,None,0,0,5,"n/a"] + [10]*11])
     p = parse_input(data)
-    assert p.skus[0].sit == 0
-    assert {w.column for w in p.warnings} >= {"SIT Ctns (pending order)"}
+    assert p.skus[0].forecast["2026-10"] == 0
+    assert {w.column for w in p.warnings} >= {"2026 Oct IMS"}
 
 def test_data_sheet_without_stock_columns_parses():
     headers = [h for h in DEFAULT_HEADERS if h not in ("Total Sellable (Ctns)", "Total Non-Sellable (Ctns)")]
     p = parse_input(make_workbook([["1001", "Honesty", "X", 12, 0, 6, 14, 3, 5] + [10] * 12], headers=headers))
-    assert [w.message for w in p.warnings] == [SETTINGS_COLUMNS_MESSAGE]
-    assert p.skus[0].sellable == 0 and p.skus[0].non_sellable == 0 and p.skus[0].sit == 3
+    assert [w.message for w in p.warnings] == [STOCK_COLUMNS_MESSAGE, SETTINGS_COLUMNS_MESSAGE]  # the SIT column
+    assert p.skus[0].sellable == 0 and p.skus[0].non_sellable == 0 and p.skus[0].sit == 0
     assert p.skus[0].pg_sellable is None and p.skus[0].pdg_non_sellable is None
 
 
@@ -72,16 +71,16 @@ def test_each_stock_column_triggers_the_single_ignored_warning():
     p = parse_input(make_workbook([["1001", "Honesty", "X", 12, 0, 6, 14, 9, 3, 5] + [10] * 12], headers=headers))
     assert [w.message for w in p.warnings] == [STOCK_COLUMNS_MESSAGE, SETTINGS_COLUMNS_MESSAGE]
     assert p.warnings[0].sap_code is None and p.warnings[0].column is None
-    assert p.skus[0].sit == 3 and p.skus[0].sellable == 0
+    assert p.skus[0].sit == 0 and p.skus[0].sellable == 0
 
 
 def test_moq_and_lead_columns_are_optional_and_ignored():
-    stock = ("Total Sellable (Ctns)", "Total Non-Sellable (Ctns)")
+    stock = ("Total Sellable (Ctns)", "Total Non-Sellable (Ctns)", "SIT Ctns (pending order) ")
     without = [h for h in DEFAULT_HEADERS if h not in stock + ("MOQ", "Lead Time")]
-    p = parse_input(make_workbook([["1001", "Honesty", "X", 12, 6, 3, 5] + [10] * 12], headers=without))
+    p = parse_input(make_workbook([["1001", "Honesty", "X", 12, 6, 5] + [10] * 12], headers=without))
     assert p.warnings == [] and p.skus[0].moq == 0 and p.skus[0].lead_time_days is None
     with_cols = [h for h in DEFAULT_HEADERS if h not in stock]
-    p = parse_input(make_workbook([["1001", "Honesty", "X", 12, 8000, 6, -5, 3, 5] + [10] * 12], headers=with_cols))
+    p = parse_input(make_workbook([["1001", "Honesty", "X", 12, 8000, 6, -5, 5] + [10] * 12], headers=with_cols))
     assert [w.message for w in p.warnings] == [SETTINGS_COLUMNS_MESSAGE]
     assert p.warnings[0].sap_code is None and p.warnings[0].column is None
     assert p.skus[0].moq == 0 and p.skus[0].lead_time_days is None   # the values are never read
@@ -110,7 +109,7 @@ def test_numeric_text_is_parsed():
     s = p.skus[0]
     assert s.packing_size == 12 and s.moq == 0 and s.shelf_life_months == 6
     assert s.lead_time_days is None
-    assert s.sit == 7 and s.mtd_sales == 1000
+    assert s.sit == 0 and s.mtd_sales == 1000
     assert s.forecast["2026-10"] == 1250.5
     # the old-style stock, MOQ and lead time columns are ignored
     assert [w.message for w in p.warnings] == [STOCK_COLUMNS_MESSAGE, SETTINGS_COLUMNS_MESSAGE]
@@ -163,11 +162,10 @@ def test_four_letter_june_forecast_header_parses():
     assert p.forecast_months == ["2027-06", "2027-07"] and p.mtd_month == "2027-06"
 
 
-def test_negative_shelf_life_becomes_unknown_with_warning():
+def test_negative_shelf_life_becomes_unknown_without_warning():
     p = parse_input(make_workbook([["1001", "Honesty", "X", 12, 0, -6, 14, 10, 0, 0, 5] + [10] * 12]))
     assert p.skus[0].shelf_life_months is None
-    assert any(w.column == "Shelf Life month" and "shelf life" in w.message and "not used" in w.message
-               for w in p.warnings)
+    assert not [w for w in p.warnings if w.column == "Shelf Life month"]
 
 
 def test_negative_forecast_is_clamped_with_warning():
@@ -203,22 +201,57 @@ def test_forecast_entirely_before_the_window_is_rejected():
 
 # ---- negative stock and v1-only wording -------------------------------------------------------
 
-def test_negative_stock_warns():
+def test_data_sheet_stock_and_sit_values_are_not_read():
     p = parse_input(make_workbook([["1001", "Honesty", "X", 12, 0, 6, 14, -20, 0, -3, 5] + [10] * 12]))
-    assert p.skus[0].sit == -3
-    msgs = {w.column: w.message for w in p.warnings if "negative" in w.message}
-    assert msgs == {"SIT Ctns (pending order)": "negative SIT — check the Data sheet"}
-    assert all(w.sap_code == "1001" for w in p.warnings if "negative" in w.message)
+    assert p.skus[0].sit == 0 and p.skus[0].sellable == 0
+    assert not [w for w in p.warnings if "negative" in w.message]
 
 
-def test_v1_only_warnings_say_they_are_not_used():
+def test_unused_shelf_life_and_mtd_values_do_not_warn():
     rows = [["1001", "Honesty", "X", 12, 0, 0, 14, 10, 0, 0, -5] + [10] * 12,
-            ["1002", "Honesty", "X", 12, 0, -2, 14, 10, 0, 0, 5] + [10] * 12,
-            ["1003", "Honesty", "X", 12, 0, "n/a", 14, 10, 0, 0, 5] + [10] * 12]
-    msgs = [w.message for w in parse_input(make_workbook(rows)).warnings
-            if w.message not in (STOCK_COLUMNS_MESSAGE, SETTINGS_COLUMNS_MESSAGE)]
-    assert sorted(msgs) == [
-        "negative MTD sales (not used in the order calculation)",
-        "negative shelf life (not used in the order calculation)",
-        "non-numeric shelf life (not used in the order calculation)",
-        "shelf life 0 (not used in the order calculation)"]
+            ["1002", "Honesty", "X", 12, 0, -2, 14, 10, 0, 0, "n/a"] + [10] * 12,
+            ["1003", "Honesty", "X", 12, 0, "n/a", 14, 10, 0, 0, None] + [10] * 12]
+    p = parse_input(make_workbook(rows))
+    assert [w.message for w in p.warnings] == [STOCK_COLUMNS_MESSAGE, SETTINGS_COLUMNS_MESSAGE]
+    assert [s.mtd_sales for s in p.skus] == [-5, 0, 0]
+
+
+def test_drop_unused_warnings_clears_those_stored_by_older_runs():
+    p = parse_input(make_workbook([["1001", "Honesty", "X", 12, 0, 6, 14, 10, 0, 0, 5, -40] + [10] * 11]))
+    sit = next(w for w in p.warnings if "negative forecast" in w.message)
+    old = [ParseWarning(sap_code="1001", column="Shelf Life month", message="shelf life 0 treated as unknown (no cap)"),
+           ParseWarning(sap_code="1001", column="Shelf  Life month", message="negative shelf life (not used)"),
+           ParseWarning(sap_code="1001", column=p.mtd_label, message="negative MTD sales (returns) treated as 0")]
+    stored = p.model_copy(update={"warnings": p.warnings + old})
+    assert drop_unused_warnings(stored).warnings == p.warnings
+    assert sit in drop_unused_warnings(stored).warnings
+
+
+# ---- SIT from the Stock in Transit file, UOM as packing size ---------------------------------
+
+def test_sit_column_not_required():
+    headers = [h for h in DEFAULT_HEADERS if h != "SIT Ctns (pending order) "]
+    row = ["1001", "Honesty", "X", 12, 0, 6, 14, 10, 0, 5] + [10] * 12
+    p = parse_input(make_workbook([row], headers=headers))
+    assert p.skus[0].sit == 0
+
+
+def test_sit_column_ignored_with_note():
+    stock = ("Total Sellable (Ctns)", "Total Non-Sellable (Ctns)")
+    headers = [h for h in DEFAULT_HEADERS if h not in stock]
+    p = parse_input(make_workbook([["1001", "Honesty", "X", 12, 0, 6, 14, 99, 5] + [10] * 12], headers=headers))
+    assert p.skus[0].sit == 0
+    note = next(w for w in p.warnings if w.message == STOCK_COLUMNS_MESSAGE)
+    assert note.sap_code is None and note.column is None
+
+
+def test_uom_accepted_as_packing_size():
+    headers = ["UOM" if h == "Packing Size" else h for h in DEFAULT_HEADERS]
+    p = parse_input(make_workbook([["1001", "Honesty", "X", 25, 0, 6, 14, 10, 0, 0, 5] + [10] * 12], headers=headers))
+    assert p.skus[0].packing_size == 25.0
+
+
+def test_missing_packing_size_and_uom():
+    headers = [h for h in DEFAULT_HEADERS if h != "Packing Size"]
+    with pytest.raises(InputFileError, match=r"missing required column\(s\): Packing Size \(or UOM\)"):
+        parse_input(make_workbook([], headers=headers))

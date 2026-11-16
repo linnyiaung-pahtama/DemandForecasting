@@ -2,8 +2,8 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { errorText, getRun, getSupplierSummary } from '../api'
 import ModeSwitch from '../components/ModeSwitch'
-import { fmtDate, fmtMonths, fmtQty, monthLabel } from '../lib/format'
-import { hasOrderPlan, MODE_LABEL, modeQuery, poLines, skuView, summaryView } from '../lib/mode'
+import { cityLabel, fmtDate, fmtQty, monthLabel } from '../lib/format'
+import { hasOrderPlan, MODE_LABEL, modeQuery, poLines, rowKey, skuView, summaryView } from '../lib/mode'
 import { usePlanMode } from '../lib/usePlanMode'
 import type { RunRecord, SupplierSummary } from '../types'
 
@@ -44,6 +44,8 @@ function SupplierView({ runId }: { runId: number }) {
 
   // SKUs to order this month in the chosen mode, grouped by principal: the lines for one purchase order.
   const linesBySupplier = useMemo(() => poLines(run?.result.skus ?? [], mode), [run, mode])
+  // A run split by city lists each line's city; older runs have one combined line per SKU.
+  const byCity = useMemo(() => (run?.result.skus ?? []).some((s) => s.city !== null), [run])
 
   // Largest purchase order first in the chosen mode, then by name.
   const rows = useMemo(
@@ -102,10 +104,10 @@ function SupplierView({ runId }: { runId: number }) {
             <thead>
               <tr>
                 <th>Principal</th>
-                <th className="num">Holding (months)</th>
+                <th className="num">Holding (days)</th>
                 <th className="num">MOQ</th>
                 <th className="num">Lead time (days)</th>
-                <th className="num">Order cycle (months)</th>
+                <th className="num">Order cycle (weeks)</th>
                 <th className="num">SKUs</th>
                 <th className="num">SKUs to order</th>
                 <th className="num">Total order qty</th>
@@ -136,15 +138,15 @@ function SupplierView({ runId }: { runId: number }) {
                         </button>
                       </td>
                       <td className="num">
-                        {s.holding_months === null ? (
+                        {s.holding_days === null ? (
                           <span className="chip chip-red">not set</span>
                         ) : (
-                          fmtMonths(s.holding_months)
+                          fmtQty(s.holding_days)
                         )}
                       </td>
                       <td className="num">{s.moq === null ? '—' : fmtQty(s.moq)}</td>
                       <td className="num">{s.lead_time_days ?? '—'}</td>
-                      <td className="num">{s.order_cycle_months ?? '—'}</td>
+                      <td className="num">{s.order_cycle_weeks ?? '—'}</td>
                       <td className="num">{s.sku_count}</td>
                       <td className="num">{view.skusToOrder ?? '—'}</td>
                       <td className="num">{view.totalOrderQty === null ? '—' : fmtQty(view.totalOrderQty)}</td>
@@ -159,7 +161,7 @@ function SupplierView({ runId }: { runId: number }) {
                             <span className="muted">Recalculate to see the order plan.</span>
                           ) : lines.length === 0 ? (
                             <span className="muted">
-                              {s.holding_months === null
+                              {s.holding_days === null
                                 ? 'Holding not set, so no orders are calculated for this principal.'
                                 : 'No SKUs to order.'}
                             </span>
@@ -169,6 +171,7 @@ function SupplierView({ runId }: { runId: number }) {
                                 <tr>
                                   <th>SAP Code</th>
                                   <th>Description</th>
+                                  {byCity && <th>Region</th>}
                                   <th className="num">Order qty</th>
                                   <th>Next calc date</th>
                                 </tr>
@@ -177,9 +180,10 @@ function SupplierView({ runId }: { runId: number }) {
                                 {lines.map((sku) => {
                                   const line = skuView(sku, mode)
                                   return (
-                                    <tr key={sku.sap_code}>
+                                    <tr key={rowKey(sku)}>
                                       <td>{sku.sap_code}</td>
                                       <td>{sku.description}</td>
+                                      {byCity && <td>{cityLabel(sku.city)}</td>}
                                       <td className="num">
                                         {fmtQty(line.orderQty ?? 0)}
                                         {line.moqApplied && <span className="chip chip-grey tag">MOQ</span>}

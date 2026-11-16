@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { errorText, getSettings, getSettingsLog, listRuns, recalculate, saveSettings } from '../api'
-import { fmtDate, fmtMonths, fmtTime } from '../lib/format'
+import { fmtDate, fmtTime } from '../lib/format'
 import {
   changedSettings,
   logValue,
@@ -37,20 +37,23 @@ function toDrafts(rows: SupplierSettingView[]): Record<string, Draft> {
   const drafts: Record<string, Draft> = {}
   for (const r of rows) {
     drafts[r.supplier] = {
-      holding: r.holding_months === null ? '' : fmtMonths(r.holding_months),
+      holding: r.holding_days === null ? '' : String(r.holding_days),
       moq: String(r.moq),
       lead: r.lead_time_days === null ? '' : String(r.lead_time_days),
-      cycle: String(r.order_cycle_months),
+      cycle: String(r.order_cycle_weeks),
     }
   }
   return drafts
 }
 
 const FIELD_LABEL: Record<SettingField, string> = {
-  holding_months: 'Holding',
+  holding_days: 'Holding (days)',
   moq: 'MOQ',
   lead_time_days: 'Lead time',
-  order_cycle_months: 'Order cycle',
+  order_cycle_weeks: 'Order cycle (weeks)',
+  // lines written before holding moved to days and the cycle to weeks
+  holding_months: 'Holding (months)',
+  order_cycle_months: 'Order cycle (months)',
 }
 
 const EMPTY: Draft = { holding: '', moq: '', lead: '', cycle: '' }
@@ -111,10 +114,10 @@ export default function SettingsPage() {
       const c = checks[r.supplier]
       if (c && !c.holding.error && !c.moq.error && !c.lead.error && c.moq.value !== null && c.cycle.value !== null) {
         edited[r.supplier] = {
-          holding_months: c.holding.value,
+          holding_days: c.holding.value,
           moq: c.moq.value,
           lead_time_days: c.lead.value,
-          order_cycle_months: c.cycle.value,
+          order_cycle_weeks: c.cycle.value,
         }
       }
     }
@@ -175,11 +178,11 @@ export default function SettingsPage() {
     <div>
       <h2>Principal settings</h2>
       <p className="muted">
-        Holding is how many months of stock to keep for each principal. Order = average monthly demand × holding −
-        (sellable + SIT). An order above 0 but below the principal's MOQ is raised to the MOQ; the MOQ applies to each
+        Holding is how many days of stock to keep for each principal: buffer = average monthly sales ÷ 30 × holding
+        days, and the order brings stock (sellable + SIT) up to it. An order above 0 but below the principal's MOQ is raised to the MOQ; the MOQ applies to each
         SKU of the principal on its own (0 = no minimum). Lead time only sets the next calculation date. Order cycle is
-        how often each principal is ordered from: 3 means one order every three months, each covering the months until the
-        next order (1 = every month).
+        how often each principal is ordered from, in weeks: 4 means one order every four weeks from the plan date, each
+        covering the weeks until the next order (4 is the default until you enter a principal's cycle).
       </p>
 
       {loadError && (
@@ -202,10 +205,10 @@ export default function SettingsPage() {
                 <tr>
                   <th>Principal</th>
                   <th className="num">SKUs</th>
-                  <th>Holding (months)</th>
+                  <th>Holding (days)</th>
                   <th>MOQ (cartons)</th>
                   <th>Lead time (days)</th>
-                  <th>Order cycle (months)</th>
+                  <th>Order cycle (weeks)</th>
                   <th>Notes</th>
                 </tr>
               </thead>
@@ -217,14 +220,14 @@ export default function SettingsPage() {
                     ? [c.holding.error, c.moq.error, c.lead.error, c.cycle.error].filter((e): e is string => e !== null)
                     : []
                   return (
-                    <tr key={r.supplier} className={r.holding_months === null ? 'default-row' : undefined}>
+                    <tr key={r.supplier} className={r.holding_days === null ? 'default-row' : undefined}>
                       <td>{r.supplier}</td>
                       <td className="num">{r.sku_count}</td>
                       <td>
                         <input
                           type="text"
                           inputMode="decimal"
-                          aria-label={`Holding months for ${r.supplier}`}
+                          aria-label={`Holding days for ${r.supplier}`}
                           aria-invalid={Boolean(c?.holding.error)}
                           value={d.holding}
                           onChange={(e) => edit(r.supplier, 'holding', e.target.value)}
@@ -257,7 +260,7 @@ export default function SettingsPage() {
                         <input
                           type="text"
                           inputMode="numeric"
-                          aria-label={'Order cycle months for ' + r.supplier}
+                          aria-label={'Order cycle weeks for ' + r.supplier}
                           aria-invalid={Boolean(c?.cycle.error)}
                           value={d.cycle}
                           onChange={(e) => edit(r.supplier, 'cycle', e.target.value)}
@@ -265,7 +268,7 @@ export default function SettingsPage() {
                         />
                       </td>
                       <td>
-                        {r.holding_months === null && <div className="note-default">Holding not set — SKUs blocked</div>}
+                        {r.holding_days === null && <div className="note-default">Holding not set — SKUs blocked</div>}
                         {r.lead_time_days === null && (
                           <div className="muted">Lead time not set — no next calculation date</div>
                         )}

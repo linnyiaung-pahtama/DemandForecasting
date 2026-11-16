@@ -1,19 +1,18 @@
 import { fmtMonths, fmtQty } from './format'
 import type { SettingField, SupplierSettings, SupplierSettingView } from '../types'
 
-export const HOLDING_MIN = 0.5
-export const HOLDING_MAX = 24
+export const HOLDING_MIN = 15 // days (half a month)
+export const HOLDING_MAX = 720 // days (24 months)
 export const LEAD_TIME_MAX = 365
 export const ORDER_CYCLE_MIN = 1
-export const ORDER_CYCLE_MAX = 12
+export const ORDER_CYCLE_MAX = 52 // weeks
 
-const HOLDING_ERROR = `Holding must be a number from ${HOLDING_MIN} to ${HOLDING_MAX} months, or blank.`
+const HOLDING_ERROR = `Holding must be a whole number of days from ${HOLDING_MIN} to ${HOLDING_MAX}, or blank.`
 const MOQ_ERROR = 'MOQ must be a whole number of cartons, 0 or more.'
 const LEAD_ERROR = `Lead time must be a whole number of days from 0 to ${LEAD_TIME_MAX}, or blank.`
-const CYCLE_ERROR = `Order cycle must be a whole number of months from ${ORDER_CYCLE_MIN} to ${ORDER_CYCLE_MAX}.`
+const CYCLE_ERROR = `Order cycle must be a whole number of weeks from ${ORDER_CYCLE_MIN} to ${ORDER_CYCLE_MAX}.`
 
-// Plain decimal notation only, so "1e1" and "0x10" are rejected rather than silently parsed.
-const DECIMAL = /^(\d+(\.\d*)?|\.\d+)$/
+// Plain digits only, so "1e1" and "0x10" are rejected rather than silently parsed.
 const WHOLE = /^\d+$/
 
 export interface Parsed {
@@ -21,11 +20,11 @@ export interface Parsed {
   error: string | null
 }
 
-/** Parses one holding input. Blank means "not set" (null, no error). */
+/** Parses one holding input: whole days from 15 to 720. Blank means "not set" (null, no error). */
 export function validateHolding(text: string): Parsed {
   const trimmed = text.trim()
   if (trimmed === '') return { value: null, error: null }
-  const value = DECIMAL.test(trimmed) ? Number(trimmed) : NaN
+  const value = WHOLE.test(trimmed) ? Number(trimmed) : NaN
   if (!Number.isFinite(value) || value < HOLDING_MIN || value > HOLDING_MAX) {
     return { value: null, error: HOLDING_ERROR }
   }
@@ -43,18 +42,19 @@ export function validateMoq(text: string): Parsed {
 }
 
 /**
- * One change-log value: holding in months ("not set" when blank), MOQ in cartons, lead time in days ("blank"),
- * order cycle in months.
+ * One change-log value: holding in days ("not set" when blank), MOQ in cartons, lead time in days ("blank"),
+ * order cycle in weeks. Lines written before those settings moved to days and weeks read in months.
  */
 export function logValue(field: SettingField, value: number | null): string {
-  if (value === null) return field === 'holding_months' ? 'not set' : 'blank'
+  if (value === null) return field === 'holding_days' || field === 'holding_months' ? 'not set' : 'blank'
   if (field === 'moq') return fmtQty(value)
-  if (field === 'lead_time_days') return `${value} days`
+  if (field === 'holding_days' || field === 'lead_time_days') return `${fmtQty(value)} day${value === 1 ? '' : 's'}`
+  if (field === 'order_cycle_weeks') return `${value} week${value === 1 ? '' : 's'}`
   if (field === 'order_cycle_months') return `${value} month${value === 1 ? '' : 's'}`
-  return fmtMonths(value)
+  return `${fmtMonths(value)} month${value === 1 ? '' : 's'}`
 }
 
-/** Parses one order-cycle input: whole months from 1 to 12. Blank is an error: there is always a cycle. */
+/** Parses one order-cycle input: whole weeks from 1 to 52. Blank is an error: there is always a cycle. */
 export function validateOrderCycle(text: string): Parsed {
   const trimmed = text.trim()
   const value = WHOLE.test(trimmed) ? Number(trimmed) : NaN
@@ -73,9 +73,9 @@ export function validateLeadTime(text: string): Parsed {
   return { value, error: null }
 }
 
-export type EditedSettings = Omit<SupplierSettings, 'supplier' | 'moq' | 'order_cycle_months'> & {
+export type EditedSettings = Omit<SupplierSettings, 'supplier' | 'moq' | 'order_cycle_weeks'> & {
   moq: number
-  order_cycle_months: number
+  order_cycle_weeks: number
 }
 
 /**
@@ -91,17 +91,17 @@ export function changedSettings(
     const e = edited[o.supplier]
     if (!e) continue
     if (
-      e.holding_months !== o.holding_months ||
+      e.holding_days !== o.holding_days ||
       e.moq !== o.moq ||
       e.lead_time_days !== o.lead_time_days ||
-      e.order_cycle_months !== o.order_cycle_months
+      e.order_cycle_weeks !== o.order_cycle_weeks
     ) {
       out.push({
         supplier: o.supplier,
-        holding_months: e.holding_months,
+        holding_days: e.holding_days,
         moq: e.moq,
         lead_time_days: e.lead_time_days,
-        order_cycle_months: e.order_cycle_months,
+        order_cycle_weeks: e.order_cycle_weeks,
       })
     }
   }

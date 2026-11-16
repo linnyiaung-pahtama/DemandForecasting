@@ -1,7 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createRun, errorText, inspectFiles } from '../api'
-import { fmtDate, fmtQty, monthLabel } from '../lib/format'
+import CommitEditor from '../components/CommitEditor'
+import { commitProblem, toCommits, type CommitLine } from '../lib/commits'
+import { fmtDate, fmtDayMonth, fmtQty, monthLabel } from '../lib/format'
+import { commitWeeks } from '../lib/mode'
 import { stockFileWarnings } from '../lib/warnings'
 import type { InspectResponse } from '../types'
 
@@ -17,24 +20,35 @@ export default function UploadPage() {
   const [salesFile, setSalesFile] = useState<File | null>(null)
   const [pgFile, setPgFile] = useState<File | null>(null)
   const [pdgFile, setPdgFile] = useState<File | null>(null)
+  const [sitFile, setSitFile] = useState<File | null>(null)
   const [info, setInfo] = useState<InspectResponse | null>(null)
   const [planDate, setPlanDate] = useState('')
   const [inspecting, setInspecting] = useState(false)
   const [calculating, setCalculating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Commits: stock agreed with a principal that isn't in the Stock in Transit file yet (entered fresh each plan).
+  const [commits, setCommits] = useState<CommitLine[]>([])
 
-  // Inspect whenever all four files are chosen or any changes. The cleanup flag drops a
+  const weeks = useMemo(
+    () => (info && planDate ? commitWeeks(planDate, info.forecast_months) : []),
+    [info, planDate],
+  )
+  const commitIssue = info
+    ? commitProblem(commits, new Set(info.skus.map((s) => s.sap_code)), new Set(weeks.map((w) => w.monday)))
+    : null
+
+  // Inspect whenever all five files are chosen or any changes. The cleanup flag drops a
   // response that arrives after the files have changed again.
   useEffect(() => {
     setInfo(null)
     setError(null)
-    if (!dataFile || !salesFile || !pgFile || !pdgFile) {
+    if (!dataFile || !salesFile || !pgFile || !pdgFile || !sitFile) {
       setInspecting(false)
       return
     }
     let current = true
     setInspecting(true)
-    inspectFiles({ data: dataFile, sales: salesFile, pg: pgFile, pdg: pdgFile })
+    inspectFiles({ data: dataFile, sales: salesFile, pg: pgFile, pdg: pdgFile, sit: sitFile })
       .then((result) => {
         if (!current) return
         setInfo(result)
@@ -49,16 +63,17 @@ export default function UploadPage() {
     return () => {
       current = false
     }
-  }, [dataFile, salesFile, pgFile, pdgFile])
+  }, [dataFile, salesFile, pgFile, pdgFile, sitFile])
 
   async function onCalculate() {
-    if (!dataFile || !salesFile || !pgFile || !pdgFile || !info) return
+    if (!dataFile || !salesFile || !pgFile || !pdgFile || !sitFile || !info || commitIssue) return
     setCalculating(true)
     setError(null)
     try {
       const run = await createRun(
-        { data: dataFile, sales: salesFile, pg: pgFile, pdg: pdgFile },
+        { data: dataFile, sales: salesFile, pg: pgFile, pdg: pdgFile, sit: sitFile },
         planDate || undefined,
+        toCommits(commits),
       )
       navigate(`/runs/${run.id}`)
     } catch (err) {
@@ -67,17 +82,22 @@ export default function UploadPage() {
     }
   }
 
-  const stockAlerts = info ? stockFileWarnings(info.warnings) : []
+  // The stock reports' file-level warnings, then the Stock in Transit file's.
+  const stockAlerts = info
+    ? [...stockFileWarnings(info.warnings), ...(info.stock.sit_warnings ?? []).filter((w) => w.sap_code === null)]
+    : []
+  const sit = info?.stock.sit ?? null
 
   return (
     <div className="stack">
       <div className="card">
         <h2>New plan</h2>
         <p className="muted">
-          Choose the Data file (only the Data sheet is read), the sales export, and the two stock reports.
+          Choose the Sales Forecast file (only its Data sheet is read), the Actual Sales file, the two stock
+          reports and the stock in transit file.
         </p>
         <div className="field">
-          <label htmlFor="data-file">Data file (.xlsx)</label>
+          <label htmlFor="data-file">Sales Forecast file (.xlsx)</label>
           <input
             id="data-file"
             type="file"
@@ -87,7 +107,7 @@ export default function UploadPage() {
           />
         </div>
         <div className="field">
-          <label htmlFor="sales-file">Sales export (.xlsx)</label>
+          <label htmlFor="sales-file">Actual Sales file (.xlsx)</label>
           <input
             id="sales-file"
             type="file"
@@ -116,6 +136,16 @@ export default function UploadPage() {
             disabled={calculating}
           />
         </div>
+        <div className="field">
+          <label htmlFor="sit-file">Stock in Transit (.xlsx)</label>
+          <input
+            id="sit-file"
+            type="file"
+            accept=".xlsx"
+            onChange={(e) => setSitFile(e.target.files?.[0] ?? null)}
+            disabled={calculating}
+          />
+        </div>
         {inspecting && <p className="muted">Reading files…</p>}
       </div>
 
@@ -128,7 +158,9 @@ export default function UploadPage() {
       {info && (
         <div className="card">
           <h2>
-            {[info.file_name, info.sales_file_name, info.pg_file_name, info.pdg_file_name].join(' + ')}
+            {[info.file_name, info.sales_file_name, info.pg_file_name, info.pdg_file_name, info.sit_file_name].join(
+              ' + ',
+            )}
           </h2>
           <dl className="facts">
             <div>
@@ -165,6 +197,17 @@ export default function UploadPage() {
               <dd>
                 {fmtQty(info.stock.pdg.sellable_cartons)} cartons
                 {info.stock.pdg.as_of ? ` · printed ${fmtDate(info.stock.pdg.as_of)}` : ' · date not found'}
+              </dd>
+            </div>
+            <div>
+              <dt>Stock in transit</dt>
+              <dd>
+                {sit === null || sit.skus_with_sit === 0
+                  ? 'No stock in transit'
+                  : `${sit.skus_with_sit} of ${info.sku_count} SKUs, ${fmtQty(sit.cartons)} cartons` +
+                    (sit.first_arrival && sit.last_arrival
+                      ? ` arriving ${fmtDayMonth(sit.first_arrival)} – ${fmtDayMonth(sit.last_arrival)}`
+                      : '')}
               </dd>
             </div>
           </dl>
@@ -222,7 +265,17 @@ export default function UploadPage() {
             )}
           </details>
 
-          <button className="primary" onClick={onCalculate} disabled={calculating || !planDate}>
+          <section className="commits" aria-labelledby="commits-head">
+            <h3 id="commits-head">Commit</h3>
+            <p className="muted">
+              Stock already agreed with a principal that isn&apos;t in the Stock in Transit file yet. Each commit
+              counts like stock in transit arriving on the Monday of its week, in its region, so it isn&apos;t
+              ordered again.
+            </p>
+            <CommitEditor lines={commits} onChange={setCommits} skus={info.skus} weeks={weeks} disabled={calculating} issue={commitIssue} />
+          </section>
+
+          <button className="primary" onClick={onCalculate} disabled={calculating || !planDate || commitIssue !== null}>
             {calculating ? 'Calculating…' : 'Calculate'}
           </button>
         </div>

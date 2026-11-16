@@ -1,6 +1,27 @@
 // Mirrors backend/app/models.py field-for-field. Dates are ISO strings (YYYY-MM-DD),
 // datetimes are ISO date-time strings. SalesExport is backend-only and has no type here.
 
+/** Stock in transit landing on a day: the Monday of its arrival week. */
+export interface SitArrival {
+  date: string // ISO date
+  cartons: number
+  source?: 'sit' | 'commit' // the Stock in Transit file (also when missing, in older runs) or a commit
+}
+
+/** Stock agreed with a principal, not yet in the Stock in Transit file, entered on New plan. */
+export interface Commit {
+  sap_code: string
+  cartons: number
+  arrival_week: string // ISO date of the week's Monday
+  region: City
+}
+
+export interface SkuOption {
+  sap_code: string
+  description: string
+  supplier: string
+}
+
 export interface SkuInput {
   sap_code: string
   supplier: string
@@ -18,6 +39,7 @@ export interface SkuInput {
   pdg_sellable: number | null
   pg_non_sellable: number | null
   pdg_non_sellable: number | null
+  sit_arrivals: SitArrival[] | null // from the Stock in Transit file; null in runs saved before it
 }
 
 export interface ParseWarning {
@@ -34,6 +56,7 @@ export interface ParsedInput {
   mtd_end: string
   default_plan_date: string
   warnings: ParseWarning[]
+  commits?: Commit[] // entered on New plan; missing in older runs
 }
 
 export interface ActualSales {
@@ -58,6 +81,16 @@ export interface StockResult {
   pdg: StockFileSummary
   skus_with_stock: number // Data SKUs with a line in either file
   warnings: ParseWarning[] // report warnings (PG then PDG), then merge warnings
+  // The Stock in Transit file's summary and warnings; missing / null for runs saved before that file.
+  sit?: SitFileSummary | null
+  sit_warnings?: ParseWarning[]
+}
+
+export interface SitFileSummary {
+  skus_with_sit: number // Sales Forecast SKUs with SIT above 0
+  cartons: number
+  first_arrival: string | null
+  last_arrival: string | null
 }
 
 export interface InspectResponse {
@@ -65,6 +98,7 @@ export interface InspectResponse {
   sales_file_name: string
   pg_file_name: string
   pdg_file_name: string
+  sit_file_name: string
   sku_count: number
   supplier_count: number
   forecast_months: string[] // all forecast columns found in the Data file
@@ -77,7 +111,8 @@ export interface InspectResponse {
   min_plan_date: string
   max_plan_date: string
   stock: StockResult
-  warnings: ParseWarning[] // Data file, sales export, stock report and merge, then stock date warnings
+  warnings: ParseWarning[] // Data file, sales export, stock report and merge, stock date, then SIT file warnings
+  skus: SkuOption[] // every Sales Forecast SKU, for the commit picker
 }
 
 export type SkuStatus = 'TO_ORDER' | 'NO_ORDER_NEEDED' | 'HOLDING_NOT_SET' | 'NO_DEMAND_DATA'
@@ -89,14 +124,25 @@ export interface DemandValue {
   valid: boolean
 }
 
+/** One planned order of the order plan: the date it is placed and its quantity. */
+export interface OrderLine {
+  date: string // ISO date
+  qty: number
+  moq_applied: boolean
+}
+
 export interface MonthPlan {
   month: string // "YYYY-MM"
   opening: number
   demand: number
-  order: number | null // null when holding is not set
+  order: number | null // null when holding is not set; in the order plan, the sum of the month's orders
   moq_applied: boolean
   closing: number
-  order_month: boolean // false only for order-plan months between orders
+  order_month: boolean // false only for order-plan months without an order date
+  orders: OrderLine[] // the order plan's orders dated in this month; empty in the forecast
+  // The order plan's SIT landing in this month (closing = opening + arrivals + order - demand); null in the forecast
+  // and in order plans saved before arrival days.
+  arrivals: number | null
 }
 
 export interface SkuResult {
@@ -115,8 +161,9 @@ export interface SkuResult {
   pdg_non_sellable: number | null
   demand_values: DemandValue[] // actuals then forecasts, oldest first
   valid_count: number
-  buffer: number | null
-  holding_months: number | null
+  avg_sales: number | null // average monthly sales of the valid values; null with no demand data
+  buffer: number | null // cartons: avg_sales ÷ 30 × holding_days; null when holding is not set
+  holding_days: number | null
   target: number | null
   required: number | null
   order_qty: number | null
@@ -126,26 +173,44 @@ export interface SkuResult {
   status: SkuStatus
   zero_forecast: boolean
   monthly: MonthPlan[] | null // the 12-month plan; null for runs saved before it
-  // The order plan (ordering every order_cycle_months) and its this-month values; the fields above are the
-  // order demand forecast's. Null / false for runs saved before the order cycle setting.
-  order_cycle_months: number | null
+  // The order plan (ordering every order_cycle_weeks from the plan date) and its this-month values; the fields
+  // above are the order demand forecast's. Null / false for runs saved before the weekly order cycle.
+  order_cycle_weeks: number | null
   order_plan: MonthPlan[] | null
   plan_order_up_to: number | null
   plan_required: number | null
   plan_order_qty: number | null
   plan_moq_applied: boolean
   plan_status: SkuStatus | null
+  // SIT arrivals (null in runs saved before the Stock in Transit file) and the run-out flag: the day stock first runs
+  // out before SIT still due, and that next arrival. Null when not flagged.
+  sit_arrivals: SitArrival[] | null
+  runs_out_on: string | null
+  runs_out_arrival: string | null
+  // The city this row plans ('YGN' / 'MDY'): a SKU has a row per city with something in it. Null for the one
+  // combined row per SKU of runs saved before the city split.
+  city: City | null
 }
+
+export type City = 'YGN' | 'MDY'
 
 export interface SupplierSettings {
   supplier: string
-  holding_months: number | null
+  holding_days: number | null
   moq: number | null // null only in runs saved before MOQ moved to supplier settings
   lead_time_days: number | null
-  order_cycle_months: number | null // null only in runs saved before the order cycle setting
+  order_cycle_weeks: number | null // null only in runs saved before the weekly order cycle
 }
 
-export type SettingField = 'holding_months' | 'moq' | 'lead_time_days' | 'order_cycle_months'
+// 'holding_months' and 'order_cycle_months' only appear in change-log lines written before those settings moved to
+// days and weeks.
+export type SettingField =
+  | 'holding_days'
+  | 'moq'
+  | 'lead_time_days'
+  | 'order_cycle_weeks'
+  | 'holding_months'
+  | 'order_cycle_months'
 
 export interface SettingsLogEntry {
   id: number
@@ -175,6 +240,7 @@ export interface RunListItem {
   sales_file_name: string
   pg_file_name: string | null // null for runs saved before the stock reports
   pdg_file_name: string | null
+  sit_file_name: string | null // null for runs saved before the Stock in Transit file
   plan_date: string
   sku_count: number
 }
@@ -188,7 +254,7 @@ export interface RunRecord extends RunListItem {
 
 export interface SupplierSummary {
   supplier: string
-  holding_months: number | null
+  holding_days: number | null
   sku_count: number
   skus_to_order: number
   total_order_qty: number
@@ -200,8 +266,8 @@ export interface SupplierSummary {
   monthly_order_qty: number[] | null // per plan month; null for runs saved before the 12-month plan
   twelve_month_total: number | null
   // The order plan's figures; null for older runs. Monthly totals are also null for a principal whose holding
-  // is not set, and null in months that are not order months.
-  order_cycle_months: number | null
+  // is not set, and null in months without an order date.
+  order_cycle_weeks: number | null
   plan_skus_to_order: number | null
   plan_total_order_qty: number | null
   plan_monthly_order_qty: (number | null)[] | null
@@ -210,9 +276,9 @@ export interface SupplierSummary {
 
 export interface SupplierSettingView {
   supplier: string
-  holding_months: number | null
+  holding_days: number | null
   moq: number
   lead_time_days: number | null
-  order_cycle_months: number
+  order_cycle_weeks: number
   sku_count: number
 }

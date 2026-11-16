@@ -7,13 +7,18 @@ from xml.etree import ElementTree
 
 from openpyxl import load_workbook
 
-from app.models import (InputFileError, ParsedInput, ParseWarning, StockFileSummary, StockLine, StockReport,
-                        StockResult, StockSource)
+from app.cities import CITIES, branch_city
+from app.models import (CityInput, InputFileError, ParsedInput, ParseWarning, StockFileSummary, StockLine,
+                        StockReport, StockResult, StockSource)
 from app.months import month_label
 from app.parsing import HEADER_SEARCH_ROWS, _is_number, _norm, _to_number, find_header_row
 
 PG_NAME = "PG Expiry Check"
 PDG_NAME = "PDG Stock List"
+
+# The column naming each row's branch: PG BranchName (Mandalay, Taunggyi, Naypyitaw… → city rule), PDG WH B
+# (Yangon / Mandalay). Optional; without it every row counts as Yangon.
+CITY_COLUMN = {"PG": "BranchName", "PDG": "WH B"}
 
 _PG_REQUIRED = ["Item Code", "Location", "Ctn"]
 _PDG_REQUIRED = ["StockCode", "Location", "Bin_Qty", "U_Ratio", "Sell or Non"]
@@ -81,6 +86,7 @@ def _parse(data: bytes, source: StockSource, name: str, required: list[str], mis
     col = {n: columns[_norm(n)] for n in required}
     c_code = col[required[0]]
     c_loc = col["Location"]
+    c_city = columns.get(_norm(CITY_COLUMN[source]))
 
     lines: list[StockLine] = []
     skipped_codes: list[str] = []
@@ -120,7 +126,8 @@ def _parse(data: bytes, source: StockSource, name: str, required: list[str], mis
         if not known:
             entry = unknown_flags.setdefault(flag, [str(flag_cell).strip() if flag_cell is not None else "", 0])
             entry[1] += 1
-        lines.append(StockLine(code=code, sellable=sellable, cartons=cartons))
+        lines.append(StockLine(code=code, sellable=sellable, cartons=cartons,
+                               city=branch_city(cell(c_city) if c_city is not None else None)))
 
     if not seen_data:
         raise InputFileError("No data rows under the header row.")
@@ -143,7 +150,8 @@ def _parse(data: bytes, source: StockSource, name: str, required: list[str], mis
         warn(f"{name}: {hidden} rows are hidden by a filter; they are still counted")
 
     as_of = _pg_as_of(rows[header_idx + 1:], columns) if source == "PG" else _pdg_as_of(rows[:header_idx])
-    return StockReport(source=source, lines=lines, as_of=as_of, skipped_codes=skipped_codes, warnings=warnings)
+    return StockReport(source=source, lines=lines, as_of=as_of, skipped_codes=skipped_codes, warnings=warnings,
+                       has_city=c_city is not None)
 
 
 def _pg_as_of(rows: list[tuple], columns: dict[str, int]) -> date | None:
@@ -190,11 +198,12 @@ def parse_pdg(data: bytes) -> StockReport:
 DATE_TOLERANCE_DAYS = 3  # a stock report this many days from the plan date (or fewer) is not flagged
 
 
-def _totals(report: StockReport, data_codes: set[str]) -> dict[str, list[float]]:
-    """Data SKU code -> [sellable cartons, non-sellable cartons] over the report's lines."""
+def _totals(report: StockReport, data_codes: set[str], city: str | None = None) -> dict[str, list[float]]:
+    """Data SKU code -> [sellable cartons, non-sellable cartons] over the report's lines (one city's lines only when
+    `city` is given)."""
     totals: dict[str, list[float]] = {}
     for line in report.lines:
-        if line.code in data_codes:
+        if line.code in data_codes and (city is None or line.city == city):
             totals.setdefault(line.code, [0.0, 0.0])[0 if line.sellable else 1] += line.cartons
     return totals
 
@@ -204,16 +213,36 @@ def apply_stock(parsed: ParsedInput, pg: StockReport, pdg: StockReport) -> tuple
     data_codes = {s.sap_code for s in parsed.skus}
     pg_totals, pdg_totals = _totals(pg, data_codes), _totals(pdg, data_codes)
 
+    by_city = any(s.cities is not None for s in parsed.skus)
+    city_totals = {city: (_totals(pg, data_codes, city), _totals(pdg, data_codes, city)) for city in CITIES}
+
     skus = []
     for sku in parsed.skus:
         pg_sell, pg_non = pg_totals.get(sku.sap_code, (0.0, 0.0))
         pdg_sell, pdg_non = pdg_totals.get(sku.sap_code, (0.0, 0.0))
-        skus.append(sku.model_copy(update={
+        update = {
             "sellable": pg_sell + pdg_sell, "non_sellable": pg_non + pdg_non,
             "pg_sellable": pg_sell, "pdg_sellable": pdg_sell,
-            "pg_non_sellable": pg_non, "pdg_non_sellable": pdg_non}))
+            "pg_non_sellable": pg_non, "pdg_non_sellable": pdg_non}
+        if sku.cities is not None:
+            cities = {}
+            for city in CITIES:
+                c_pg, c_pdg = city_totals[city]
+                cps, cpn = c_pg.get(sku.sap_code, (0.0, 0.0))
+                cds, cdn = c_pdg.get(sku.sap_code, (0.0, 0.0))
+                base = sku.cities.get(city) or CityInput()
+                cities[city] = base.model_copy(update={
+                    "sellable": cps + cds, "non_sellable": cpn + cdn, "pg_sellable": cps, "pdg_sellable": cds,
+                    "pg_non_sellable": cpn, "pdg_non_sellable": cdn})
+            update["cities"] = cities
+        skus.append(sku.model_copy(update=update))
 
     warnings = [*pg.warnings, *pdg.warnings]
+    if by_city:
+        for report, name in ((pg, PG_NAME), (pdg, PDG_NAME)):
+            if not report.has_city:
+                warnings.append(ParseWarning(sap_code=None, column=None, message=(
+                    f"{name} has no {CITY_COLUMN[report.source]} column; all its stock counts as Yangon")))
     summaries = []
     for report, name, totals in ((pg, PG_NAME, pg_totals), (pdg, PDG_NAME, pdg_totals)):
         not_in_data = {line.code for line in report.lines if line.code not in data_codes}

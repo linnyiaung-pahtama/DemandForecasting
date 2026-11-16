@@ -43,10 +43,11 @@ export default function HistoryPage() {
               <tr>
                 <th className="num">Run #</th>
                 <th>Created</th>
-                <th>Data file</th>
-                <th>Sales export</th>
+                <th>Sales Forecast file</th>
+                <th>Actual Sales file</th>
                 <th>PG Expiry Check</th>
                 <th>PDG Stock List</th>
+                <th>Stock in Transit file</th>
                 <th>Plan date</th>
                 <th className="num">SKUs</th>
               </tr>
@@ -66,6 +67,7 @@ export default function HistoryPage() {
                   <td>{r.sales_file_name}</td>
                   <td>{r.pg_file_name ?? '—'}</td>
                   <td>{r.pdg_file_name ?? '—'}</td>
+                  <td>{r.sit_file_name ?? '—'}</td>
                   <td>{fmtDate(r.plan_date)}</td>
                   <td className="num">{r.sku_count}</td>
                 </tr>

@@ -7,18 +7,32 @@ def summarize_suppliers(result: HoldingPlan) -> list[SupplierSummary]:
     for setting in result.settings_used:
         skus = [s for s in result.skus if s.supplier == setting.supplier]
         summaries.append(SupplierSummary(
-            supplier=setting.supplier, holding_months=setting.holding_months, sku_count=len(skus),
-            skus_to_order=sum(1 for s in skus if s.status == SkuStatus.TO_ORDER),
+            # The SKU columns count SKUs, not plan rows (a SKU has a row per city): a SKU is to order, blocked or
+            # zero-forecast when any of its rows is, and has no demand data only when none of its rows has any.
+            # Quantities add up every row.
+            supplier=setting.supplier, holding_days=setting.holding_days, sku_count=len({s.sap_code for s in skus}),
+            skus_to_order=_any_row(skus, lambda s: s.status == SkuStatus.TO_ORDER),
             total_order_qty=sum(s.order_qty or 0 for s in skus),
-            blocked_skus=sum(1 for s in skus if s.status == SkuStatus.HOLDING_NOT_SET),
-            no_demand_skus=sum(1 for s in skus if s.status == SkuStatus.NO_DEMAND_DATA),
-            zero_forecast_skus=sum(1 for s in skus if s.zero_forecast),
+            blocked_skus=_any_row(skus, lambda s: s.status == SkuStatus.HOLDING_NOT_SET),
+            no_demand_skus=_every_row(skus, lambda s: s.status == SkuStatus.NO_DEMAND_DATA),
+            zero_forecast_skus=_any_row(skus, lambda s: s.zero_forecast),
             moq=setting.moq, lead_time_days=setting.lead_time_days,
-            **_monthly_totals(skus, len(result.plan_months), blocked=setting.holding_months is None),
-            **_order_plan_totals(skus, setting.order_cycle_months, len(result.plan_months),
-                                 blocked=setting.holding_months is None)))
+            **_monthly_totals(skus, len(result.plan_months), blocked=setting.holding_days is None),
+            **_order_plan_totals(skus, setting.order_cycle_weeks, len(result.plan_months),
+                                 blocked=setting.holding_days is None)))
     summaries.sort(key=lambda x: (-x.total_order_qty, x.supplier))
     return summaries
+
+
+def _any_row(skus: list[SkuResult], test) -> int:
+    """SKUs with at least one plan row passing `test`."""
+    return len({s.sap_code for s in skus if test(s)})
+
+
+def _every_row(skus: list[SkuResult], test) -> int:
+    """SKUs whose plan rows all pass `test`."""
+    codes = {s.sap_code for s in skus}
+    return len(codes - {s.sap_code for s in skus if not test(s)})
 
 
 def _monthly_totals(skus: list[SkuResult], months: int, blocked: bool) -> dict:
@@ -34,9 +48,9 @@ def _order_plan_totals(skus: list[SkuResult], cycle: int | None, months: int, bl
     """This month's order-plan purchase order and its totals per plan month (None between order months).
     All blank for a run saved before the order cycle setting; the monthly totals blank when holding is not set."""
     if cycle is None or any(s.order_plan is None for s in skus):
-        return {"order_cycle_months": None}
-    out = {"order_cycle_months": cycle,
-           "plan_skus_to_order": sum(1 for s in skus if s.plan_status == SkuStatus.TO_ORDER),
+        return {"order_cycle_weeks": None}
+    out = {"order_cycle_weeks": cycle,
+           "plan_skus_to_order": _any_row(skus, lambda s: s.plan_status == SkuStatus.TO_ORDER),
            "plan_total_order_qty": sum(s.plan_order_qty or 0 for s in skus)}
     if blocked or not skus or not months:
         return out

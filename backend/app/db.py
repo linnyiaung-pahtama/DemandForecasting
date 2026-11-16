@@ -4,7 +4,7 @@ from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 8
 V1_BACKUP_NAME = "orderplan.v1-backup"
 
 SCHEMA = """
@@ -14,7 +14,9 @@ CREATE TABLE IF NOT EXISTS supplier_settings (
     updated_at TEXT NOT NULL,
     moq REAL NOT NULL DEFAULT 0,
     lead_time_days INTEGER NULL,
-    order_cycle_months INTEGER NOT NULL DEFAULT 1
+    order_cycle_months INTEGER NOT NULL DEFAULT 1,
+    order_cycle_weeks INTEGER NOT NULL DEFAULT 4,
+    holding_days REAL NULL
 );
 CREATE TABLE IF NOT EXISTS settings_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,7 +38,8 @@ CREATE TABLE IF NOT EXISTS runs (
     result_json TEXT NOT NULL,
     pg_file_name TEXT NULL,
     pdg_file_name TEXT NULL,
-    stock_json TEXT NULL
+    stock_json TEXT NULL,
+    sit_file_name TEXT NULL
 );
 """
 
@@ -57,6 +60,20 @@ V4_COLUMNS = (
 V5_COLUMNS = (("supplier_settings", "order_cycle_months", "INTEGER NOT NULL DEFAULT 1"),)
 
 
+# Added in v6: the order cycle in weeks (default 4). The v5 months column stays but is no longer read.
+V6_COLUMNS = (("supplier_settings", "order_cycle_weeks", "INTEGER NOT NULL DEFAULT 4"),)
+
+
+# Added in v7: the holding in days, filled from the months holding at 30 days a month. The months column stays
+# but is no longer read; its change-log lines stay as history.
+V7_COLUMNS = (("supplier_settings", "holding_days", "REAL NULL"),)
+V7_FILL = "UPDATE supplier_settings SET holding_days = holding_months * 30 WHERE holding_months IS NOT NULL"
+
+
+# Added in v8: the Stock in Transit file's name for each run (NULL for runs saved before it).
+V8_COLUMNS = (("runs", "sit_file_name", "TEXT NULL"),)
+
+
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
     return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
 
@@ -69,6 +86,9 @@ def init_schema(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE runs ADD COLUMN {column} TEXT NULL")
     _upgrade_to_v4(conn)
     _upgrade_to_v5(conn)
+    _add_columns(conn, V6_COLUMNS)
+    _add_columns(conn, V7_COLUMNS, fill=V7_FILL)
+    _add_columns(conn, V8_COLUMNS)
     if conn.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
@@ -94,13 +114,22 @@ def _upgrade_to_v4(conn: sqlite3.Connection) -> None:
 def _upgrade_to_v5(conn: sqlite3.Connection) -> None:
     """Add the order cycle column in place, in one transaction. Every principal starts at 1 (order every
     month), which changes no plan, so nothing is written to the change log."""
-    missing = [(t, c, d) for t, c, d in V5_COLUMNS if c not in _columns(conn, t)]
+    _add_columns(conn, V5_COLUMNS)
+
+
+def _add_columns(conn: sqlite3.Connection, columns: tuple, fill: str | None = None) -> None:
+    """Add the missing columns in place and run `fill` to set their values, in one transaction; nothing is written
+    to the change log. v6 gives every principal the 4-week default rather than converting its months cycle;
+    v7 converts the holding to days."""
+    missing = [(t, c, d) for t, c, d in columns if c not in _columns(conn, t)]
     if not missing:
         return
     conn.execute("BEGIN")
     try:
         for table, column, definition in missing:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        if fill:
+            conn.execute(fill)
         conn.execute("COMMIT")
     except BaseException:
         conn.execute("ROLLBACK")

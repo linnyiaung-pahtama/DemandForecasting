@@ -1,11 +1,12 @@
 import { skuView, type PlanMode } from './mode'
-import type { SkuResult, SkuStatus } from '../types'
+import type { City, SkuResult, SkuStatus } from '../types'
 
 export interface SkuFilter {
   supplier: string | null
   status: SkuStatus | null
   zeroForecastOnly: boolean
   search: string
+  city?: City | null // one city's rows only; null or missing for every row
 }
 
 const STATUS_ORDER: Record<SkuStatus, number> = {
@@ -26,6 +27,7 @@ export function filterSkus(skus: SkuResult[], f: SkuFilter, mode: PlanMode = 'fo
   const qty = (s: SkuResult) => view.get(s)!.orderQty
   return skus
     .filter((s) => f.supplier === null || s.supplier === f.supplier)
+    .filter((s) => !f.city || s.city === f.city)
     .filter((s) => f.status === null || status(s) === f.status)
     .filter((s) => !f.zeroForecastOnly || s.zero_forecast)
     .filter(

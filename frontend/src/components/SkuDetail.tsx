@@ -1,5 +1,15 @@
-import { fmtExact, fmtMonths, fmtQty, monthLabel, orderExplanation } from '../lib/format'
-import { MODE_LABEL, orderCell, skuView, type PlanMode } from '../lib/mode'
+import {
+  cityLabel,
+  fmtCycle,
+  fmtDate,
+  fmtExact,
+  fmtHolding,
+  fmtQty,
+  monthLabel,
+  orderExplanation,
+  runOutMessage,
+} from '../lib/format'
+import { MODE_LABEL, orderCell, skuArrivals, skuView, type PlanMode } from '../lib/mode'
 import type { ParseWarning, SkuResult } from '../types'
 import StatusChip from './StatusChip'
 
@@ -13,9 +23,13 @@ interface Props {
 
 export default function SkuDetail({ sku, planDate, mode, warnings, onClose }: Props) {
   const view = skuView(sku, mode)
-  const cycle = sku.order_cycle_months
+  const cycle = sku.order_cycle_weeks
   // An older run has no order plan: say so rather than show blanks next to the forecast's status.
   const noPlan = mode === 'plan' && sku.order_plan === null
+  // Every planned order with its date (0 included); none when holding is not set.
+  const orderLines = (view.months ?? []).flatMap((m) => m.orders)
+  const arrivals = skuArrivals(sku, planDate)
+  const runOut = runOutMessage(sku)
   return (
     <aside className="detail" aria-label={`Details for ${sku.sap_code}`}>
       <div className="detail-head">
@@ -23,6 +37,7 @@ export default function SkuDetail({ sku, planDate, mode, warnings, onClose }: Pr
           <h2>
             {sku.sap_code} · {sku.description}
           </h2>
+          {sku.city !== null && <div className="muted">{cityLabel(sku.city)}</div>}
           <div className="muted">{sku.supplier}</div>
           {!noPlan && (
             <div>
@@ -36,6 +51,11 @@ export default function SkuDetail({ sku, planDate, mode, warnings, onClose }: Pr
       </div>
 
       {noPlan && <div className="alert warn">Recalculate to see the order plan.</div>}
+      {runOut && (
+        <div className="alert error" role="status">
+          {runOut}. Chase the delivery: a new order won&apos;t arrive before it.
+        </div>
+      )}
 
       <dl className="facts">
         {!noPlan && (
@@ -46,11 +66,11 @@ export default function SkuDetail({ sku, planDate, mode, warnings, onClose }: Pr
         )}
         <div>
           <dt>Holding</dt>
-          <dd>{sku.holding_months === null ? 'Not set' : `${fmtMonths(sku.holding_months)} months`}</dd>
+          <dd>{fmtHolding(sku.holding_days, 'Not set')}</dd>
         </div>
         <div>
           <dt>Order cycle</dt>
-          <dd>{cycle === null ? '—' : cycle === 1 ? 'every month' : `every ${cycle} months`}</dd>
+          <dd>{fmtCycle(cycle)}</dd>
         </div>
         <div>
           <dt>Lead time</dt>
@@ -104,6 +124,42 @@ export default function SkuDetail({ sku, planDate, mode, warnings, onClose }: Pr
       </table>
       <p className="muted">Only values above zero are counted; the rest are skipped.</p>
 
+      <h3>Stock in transit</h3>
+      {arrivals.length === 0 ? (
+        <p className="muted">No stock in transit.</p>
+      ) : (
+        <>
+          <table>
+            <thead>
+              <tr>
+                <th>Arrives</th>
+                <th className="num">Cartons</th>
+              </tr>
+            </thead>
+            <tbody>
+              {arrivals.map((a) => (
+                <tr key={`${a.date}|${a.source ?? 'sit'}`}>
+                  <td>
+                    {fmtDate(a.date)}
+                    {a.source === 'commit' && (
+                      <span className="chip chip-grey tag commit-tag" title="A commit: stock agreed with the principal, not from the Stock in Transit file">
+                        Commit
+                      </span>
+                    )}
+                  </td>
+                  <td className="num">{fmtExact(a.cartons)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="muted">
+            {sku.sit_arrivals === null
+              ? 'Saved before the Stock in Transit file, so all SIT counts from the plan date.'
+              : 'Each delivery lands on the Monday of its arrival week (the plan date if that is earlier).'}
+          </p>
+        </>
+      )}
+
       <h3>How this is worked out</h3>
       <ol className="steps">
         {orderExplanation(sku, planDate, mode).map((line, i) => (
@@ -115,17 +171,17 @@ export default function SkuDetail({ sku, planDate, mode, warnings, onClose }: Pr
         <>
           <h3>{MODE_LABEL[mode]}</h3>
           <p className="muted">
-            Demand each month = buffer (average of the valid values above).
+            Demand each month = avg sales (the average of the valid values above).
             {mode === 'plan' &&
               cycle !== null &&
-              cycle > 1 &&
-              ` Orders are placed every ${cycle} months; · marks the months between orders.`}
+              ` Orders are placed ${fmtCycle(cycle)} from the plan date; each month is the total of its orders, and · marks months without one.`}
           </p>
           <table>
             <thead>
               <tr>
                 <th>Month</th>
                 <th className="num">Opening</th>
+                {mode === 'plan' && <th className="num">Arrivals</th>}
                 <th className="num">Demand</th>
                 <th className="num">Order</th>
                 <th className="num">Closing</th>
@@ -138,6 +194,9 @@ export default function SkuDetail({ sku, planDate, mode, warnings, onClose }: Pr
                   <tr key={m.month} className={kind === 'not-order-month' ? 'muted' : undefined}>
                     <td>{monthLabel(m.month)}</td>
                     <td className="num">{fmtExact(m.opening)}</td>
+                    {mode === 'plan' && (
+                      <td className="num">{m.arrivals == null ? '—' : fmtExact(m.arrivals)}</td>
+                    )}
                     <td className="num">{fmtExact(m.demand)}</td>
                     <td className="num" title={kind === 'not-order-month' ? 'Not an order month' : undefined}>
                       {kind === 'blocked' ? '—' : kind === 'not-order-month' ? '·' : fmtQty(m.order ?? 0)}
@@ -147,6 +206,31 @@ export default function SkuDetail({ sku, planDate, mode, warnings, onClose }: Pr
                   </tr>
                 )
               })}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {mode === 'plan' && orderLines.length > 0 && (
+        <>
+          <h3>Orders</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th className="num">Quantity</th>
+              </tr>
+            </thead>
+            <tbody>
+              {orderLines.map((o) => (
+                <tr key={o.date} className={o.qty === 0 ? 'muted' : undefined}>
+                  <td>{fmtDate(o.date)}</td>
+                  <td className="num">
+                    {fmtQty(o.qty)}
+                    {o.moq_applied && <span className="chip chip-grey tag">MOQ</span>}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </>

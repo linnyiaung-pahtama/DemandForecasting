@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
+  cityLabel,
   demandColumns,
+  fmtCycle,
+  fmtCycleShort,
   fmtDate,
   fmtQty,
   fmtTime,
@@ -9,6 +12,7 @@ import {
   monthLabel,
   monthlyTotal,
   orderExplanation,
+  runOutMessage,
   statusLabel,
 } from './format'
 import type { DemandValue, HoldingPlan, MonthPlan, SkuResult } from '../types'
@@ -58,7 +62,7 @@ function demand(values: (number | null)[]): DemandValue[] {
   }))
 }
 
-// The spec's worked example: buffer 120, holding 3, available 260, MOQ 150, lead 61 days.
+// The spec's worked example: average 120 a month, holding 90 days (buffer 360), available 260, MOQ 150, lead 61 days.
 const worked: SkuResult = {
   sap_code: '1001',
   supplier: 'Acme',
@@ -75,8 +79,9 @@ const worked: SkuResult = {
   pdg_non_sellable: null,
   demand_values: demand([100, 120, 110, 130, 140, 120]),
   valid_count: 6,
-  buffer: 120,
-  holding_months: 3,
+  avg_sales: 120,
+  buffer: 360,
+  holding_days: 90,
   target: 360,
   required: 100,
   order_qty: 150,
@@ -86,20 +91,36 @@ const worked: SkuResult = {
   status: 'TO_ORDER',
   zero_forecast: false,
   monthly: null,
-  order_cycle_months: 1,
+  order_cycle_weeks: 4,
   order_plan: null,
   plan_order_up_to: null,
   plan_required: null,
   plan_order_qty: null,
   plan_moq_applied: false,
   plan_status: null,
+  sit_arrivals: null,
+  runs_out_on: null,
+  runs_out_arrival: null,
+  city: null,
 }
+
+describe('runOutMessage', () => {
+  it('says when stock runs out and when the SIT arrives', () => {
+    expect(runOutMessage({ ...worked, runs_out_on: '2026-10-17', runs_out_arrival: '2026-10-19' })).toBe(
+      'Runs out about 17 Oct, before its stock in transit arrives on 19 Oct',
+    )
+  })
+
+  it('is null when the SKU is not flagged', () => {
+    expect(runOutMessage(worked)).toBeNull()
+  })
+})
 
 describe('orderExplanation', () => {
   it('writes out the worked example step by step', () => {
     expect(orderExplanation(worked, '2026-10-14')).toEqual([
-      'Buffer = (100 + 120 + 110 + 130 + 140 + 120) ÷ 6 = 120 a month',
-      'Target = 120 × 3 months = 360',
+      'Avg sales = (100 + 120 + 110 + 130 + 140 + 120) ÷ 6 = 120 a month',
+      'Buffer = 120 ÷ 30 × 90 days = 360',
       'Available = 200 sellable + 60 SIT = 260',
       'Required = 360 − 260 = 100',
       'MOQ check: 100 is below the MOQ of 150, so the order is 150',
@@ -108,29 +129,52 @@ describe('orderExplanation', () => {
     ])
   })
 
-  it('explains the order plan with the order-up-to level in plan mode', () => {
-    // spec small example: cycle 3, order-up-to 120 × 5 = 600, required 340, no MOQ
+  it('explains the order plan with the weekly order-up-to level in plan mode', () => {
+    // spec example: cycle 4 weeks, order-up-to 360 + 120 × (48 ÷ 52 − 1) ≈ 350.77, required 91, no MOQ
     const r: SkuResult = {
       ...worked,
       moq: 0,
       moq_applied: false,
       order_qty: 100,
-      order_cycle_months: 3,
+      order_cycle_weeks: 4,
       order_plan: [],
-      plan_order_up_to: 600,
-      plan_required: 340,
-      plan_order_qty: 340,
+      plan_order_up_to: 120 * (2 + 48 / 52),
+      plan_required: 91,
+      plan_order_qty: 91,
       plan_moq_applied: false,
       plan_status: 'TO_ORDER',
     }
     const lines = orderExplanation(r, '2026-10-14', 'plan')
-    expect(lines.slice(1, 4)).toEqual([
-      'Order-up-to = 120 × (3 + 3 − 1) months = 600',
+    expect(lines.slice(1, 6)).toEqual([
+      'Buffer = 120 ÷ 30 × 90 days = 360',
+      'Order-up-to = 360 + 120 × (4 × 12 ÷ 52 − 1) = 350.7692',
       'Available = 200 sellable + 60 SIT = 260',
-      'Required = 600 − 260 = 340',
+      'Required = 350.7692 − 260 = 90.7692, rounded up to 91',
+      'This is the order on 14 Oct 2026; the next orders are listed under Orders.',
     ])
-    expect(lines.some((l) => l.startsWith('Target') || l.startsWith('MOQ check'))).toBe(false)
+    expect(lines.some((l) => l.startsWith('MOQ check'))).toBe(false)
     expect(orderExplanation(r, '2026-10-14')).toEqual(orderExplanation(r, '2026-10-14', 'forecast'))
+    expect(orderExplanation(r, '2026-10-14').some((l) => l.startsWith('This is the order on'))).toBe(false)
+  })
+
+  it('shows the floor when the holding is under 30 days', () => {
+    // 15 days on a 2-week cycle: 60 + 120 × (24 ÷ 52 − 1) is below one cycle's sales, 120 × 24 ÷ 52
+    const r: SkuResult = {
+      ...worked,
+      holding_days: 15,
+      buffer: 60,
+      target: 60,
+      order_cycle_weeks: 2,
+      order_plan: [],
+      plan_order_up_to: (120 * 24) / 52,
+      plan_required: 0,
+      plan_order_qty: 0,
+      plan_moq_applied: false,
+      plan_status: 'NO_ORDER_NEEDED',
+    }
+    expect(orderExplanation(r, '2026-10-14', 'plan')[2]).toBe(
+      "Order-up-to = 120 × 2 × 12 ÷ 52 = 55.3846 (one cycle's sales; the holding is under 30 days)",
+    )
   })
 
   it('asks for a recalculation, not "holding not set", when an older run has no order plan', () => {
@@ -142,7 +186,7 @@ describe('orderExplanation', () => {
     const r: SkuResult = {
       ...worked,
       moq: 500,
-      order_cycle_months: 3,
+      order_cycle_weeks: 3,
       order_plan: [],
       plan_order_up_to: 600,
       plan_required: 340,
@@ -165,21 +209,23 @@ describe('orderExplanation', () => {
       ...worked,
       demand_values: demand([100, 0, null, 130, -5, 100]),
       valid_count: 3,
-      buffer: 110,
+      avg_sales: 110,
+      buffer: 330,
       target: 330,
       required: 70,
       moq_applied: false,
       order_qty: 70,
     }
     const lines = orderExplanation(r, '2026-10-14')
-    expect(lines[0]).toBe('Buffer = (100 + 130 + 100) ÷ 3 = 110 a month')
+    expect(lines[0]).toBe('Avg sales = (100 + 130 + 100) ÷ 3 = 110 a month')
     expect(lines.some((l) => l.startsWith('MOQ check'))).toBe(false)
   })
 
-  it('replaces target, required and MOQ lines when holding is not set', () => {
+  it('replaces buffer, required and MOQ lines when holding is not set', () => {
     const r: SkuResult = {
       ...worked,
-      holding_months: null,
+      holding_days: null,
+      buffer: null,
       target: null,
       required: null,
       order_qty: null,
@@ -187,7 +233,7 @@ describe('orderExplanation', () => {
       status: 'HOLDING_NOT_SET',
     }
     expect(orderExplanation(r, '2026-10-14')).toEqual([
-      'Buffer = (100 + 120 + 110 + 130 + 140 + 120) ÷ 6 = 120 a month',
+      'Avg sales = (100 + 120 + 110 + 130 + 140 + 120) ÷ 6 = 120 a month',
       'Holding not set for Acme — no order calculated',
       'Available = 200 sellable + 60 SIT = 260',
       'Stock cover = 260 ÷ 120 = 2.2 months',
@@ -200,7 +246,8 @@ describe('orderExplanation', () => {
       ...worked,
       demand_values: demand([0, null, -3, 0, 0, null]),
       valid_count: 0,
-      buffer: null,
+      avg_sales: null,
+      buffer: 0,
       target: 0,
       required: 0,
       order_qty: 0,
@@ -225,7 +272,7 @@ describe('orderExplanation', () => {
       status: 'NO_ORDER_NEEDED',
     }
     const lines = orderExplanation(r, '2026-10-14')
-    expect(lines).toContain('Required = 0 (available already covers the target)')
+    expect(lines).toContain('Required = 0 (available already covers the buffer)')
     expect(lines.some((l) => l.startsWith('MOQ check'))).toBe(false)
   })
 
@@ -241,8 +288,9 @@ describe('orderExplanation', () => {
       available: 22.15 + 16,
       demand_values: demand([2113 / 40, 1451 / 40, 1647 / 40, 55, 55, 55]),
       valid_count: 6,
-      buffer: 49.2125,
-      holding_months: 3,
+      avg_sales: 49.2125,
+      buffer: 49.2125 * 3,
+      holding_days: 90,
       target: 49.2125 * 3,
       required: 110,
       order_qty: 110,
@@ -252,8 +300,8 @@ describe('orderExplanation', () => {
     }
     const lines = orderExplanation(r, '2026-10-12')
     expect(lines).toEqual([
-      'Buffer = (52.825 + 36.275 + 41.175 + 55 + 55 + 55) ÷ 6 = 49.2125 a month',
-      'Target = 49.2125 × 3 months = 147.6375',
+      'Avg sales = (52.825 + 36.275 + 41.175 + 55 + 55 + 55) ÷ 6 = 49.2125 a month',
+      'Buffer = 49.2125 ÷ 30 × 90 days = 147.6375',
       'Available = 22.15 sellable + 16 SIT = 38.15',
       'Required = 147.6375 − 38.15 = 109.4875, rounded up to 110',
       'Stock cover = 38.15 ÷ 49.2125 = 0.8 months',
@@ -266,8 +314,9 @@ describe('orderExplanation', () => {
       ...worked,
       demand_values: demand([0, null, -3, 0, 0, null]),
       valid_count: 0,
+      avg_sales: null,
       buffer: null,
-      holding_months: null,
+      holding_days: null,
       target: null,
       required: null,
       order_qty: null,
@@ -287,16 +336,15 @@ describe('orderExplanation', () => {
     expect(lines[lines.length - 1]).toBe('Next calculation date: lead time of -2 days is not valid')
   })
 
-  it('uses singular month and day for 1', () => {
-    const r: SkuResult = { ...worked, holding_months: 1, target: 120, lead_time_days: 1, next_calc_date: '2026-10-15' }
+  it('uses singular day for 1', () => {
+    const r: SkuResult = { ...worked, lead_time_days: 1, next_calc_date: '2026-10-15' }
     const lines = orderExplanation(r, '2026-10-14')
-    expect(lines[1]).toBe('Target = 120 × 1 month = 120')
     expect(lines[lines.length - 1]).toBe('Next calculation date = 14 Oct 2026 + 1 day lead time = 15 Oct 2026')
   })
 
-  it('shows decimal holding as stored', () => {
-    const r: SkuResult = { ...worked, holding_months: 1.5, target: 180 }
-    expect(orderExplanation(r, '2026-10-14')[1]).toBe('Target = 120 × 1.5 months = 180')
+  it('shows a holding that is not a whole number of months', () => {
+    const r: SkuResult = { ...worked, holding_days: 45, buffer: 180, target: 180 }
+    expect(orderExplanation(r, '2026-10-14')[1]).toBe('Buffer = 120 ÷ 30 × 45 days = 180')
   })
 
   it('handles a missing lead time', () => {
@@ -325,8 +373,8 @@ describe('isLegacyRun', () => {
     plan_months: [],
     skus: [],
     settings_used: [
-      { supplier: 'A', holding_months: 2, moq: 0, lead_time_days: 14, order_cycle_months: 1 },
-      { supplier: 'B', holding_months: null, moq, lead_time_days: null, order_cycle_months: 1 },
+      { supplier: 'A', holding_days: 60, moq: 0, lead_time_days: 14, order_cycle_weeks: 4 },
+      { supplier: 'B', holding_days: null, moq, lead_time_days: null, order_cycle_weeks: 4 },
     ],
     blocked_suppliers: [],
     counts: {},
@@ -350,6 +398,18 @@ const month = (key: string, order: number | null): MonthPlan => ({
   moq_applied: false,
   closing: 0,
   order_month: true,
+  orders: [],
+  arrivals: null,
+})
+
+describe('fmtCycle', () => {
+  it('says how often the principal is ordered from', () => {
+    expect(fmtCycle(4)).toBe('every 4 weeks')
+    expect(fmtCycle(1)).toBe('every week')
+    expect(fmtCycle(null)).toBe('—')
+    expect(fmtCycleShort(4)).toBe('4 wk')
+    expect(fmtCycleShort(null)).toBe('—')
+  })
 })
 
 describe('monthlyTotal', () => {
@@ -359,7 +419,7 @@ describe('monthlyTotal', () => {
   })
 
   it('is null when holding is not set or there is no 12-month plan', () => {
-    expect(monthlyTotal({ ...worked, holding_months: null, monthly: [month('2026-10', null)] })).toBeNull()
+    expect(monthlyTotal({ ...worked, holding_days: null, monthly: [month('2026-10', null)] })).toBeNull()
     expect(monthlyTotal({ ...worked, monthly: null })).toBeNull()
   })
 })
@@ -409,5 +469,10 @@ describe('hasMonthly', () => {
   it('is false for a plan saved before the 12-month plan', () => {
     expect(hasMonthly(plan([withMonths], []))).toBe(false)
     expect(hasMonthly(plan([withMonths, { ...worked, monthly: null }], ['2026-10']))).toBe(false)
+  })
+})
+describe('cityLabel', () => {
+  it('names the city, or a dash for the combined rows of older runs', () => {
+    expect([cityLabel('YGN'), cityLabel('MDY'), cityLabel(null)]).toEqual(['Yangon', 'Mandalay', '—'])
   })
 })

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { changedSettings, logValue, validateHolding, validateLeadTime, validateMoq, validateOrderCycle } from './settings'
 import type { SupplierSettingView } from '../types'
 
-const HOLDING_ERROR = 'Holding must be a number from 0.5 to 24 months, or blank.'
+const HOLDING_ERROR = 'Holding must be a whole number of days from 15 to 720, or blank.'
 
 describe('validateHolding', () => {
   it('treats blank as not set', () => {
@@ -10,15 +10,15 @@ describe('validateHolding', () => {
     expect(validateHolding('   ')).toEqual({ value: null, error: null })
   })
 
-  it('accepts decimals inside the range, including both ends', () => {
-    expect(validateHolding('1.5')).toEqual({ value: 1.5, error: null })
-    expect(validateHolding('0.5')).toEqual({ value: 0.5, error: null })
-    expect(validateHolding('24')).toEqual({ value: 24, error: null })
-    expect(validateHolding(' 3 ')).toEqual({ value: 3, error: null })
+  it('accepts whole days inside the range, including both ends', () => {
+    expect(validateHolding('60')).toEqual({ value: 60, error: null })
+    expect(validateHolding('15')).toEqual({ value: 15, error: null })
+    expect(validateHolding('720')).toEqual({ value: 720, error: null })
+    expect(validateHolding(' 45 ')).toEqual({ value: 45, error: null })
   })
 
-  it('rejects out-of-range and non-numeric text', () => {
-    for (const text of ['0', '0.4', '25', '-1', 'abc', '1,5', '1e1', '0x10', 'NaN']) {
+  it('rejects out-of-range, fractional and non-numeric text', () => {
+    for (const text of ['0', '14', '721', '45.5', '-1', 'abc', '1,5', '1e1', '0x10', 'NaN']) {
       expect(validateHolding(text)).toEqual({ value: null, error: HOLDING_ERROR })
     }
   })
@@ -58,32 +58,32 @@ describe('validateLeadTime', () => {
 
 const view = (
   supplier: string,
-  holding_months: number | null,
+  holding_days: number | null,
   moq = 0,
   lead_time_days: number | null = null,
-  order_cycle_months = 1,
-): SupplierSettingView => ({ supplier, holding_months, moq, lead_time_days, order_cycle_months, sku_count: 1 })
+  order_cycle_weeks = 4,
+): SupplierSettingView => ({ supplier, holding_days, moq, lead_time_days, order_cycle_weeks, sku_count: 1 })
 
 describe('changedSettings', () => {
   it('returns the full row for suppliers with any field changed', () => {
-    const original = [view('A', 2), view('B', null, 0, 14), view('C', 3, 100, 7), view('D', 3), view('E', 2)]
+    const original = [view('A', 60), view('B', null, 0, 14), view('C', 90, 100, 7), view('D', 90), view('E', 60)]
     const edited = {
-      A: { holding_months: 2.5, moq: 0, lead_time_days: null, order_cycle_months: 1 },
-      B: { holding_months: null, moq: 0, lead_time_days: null, order_cycle_months: 1 },
-      C: { holding_months: 3, moq: 100, lead_time_days: 7, order_cycle_months: 1 },
-      D: { holding_months: 3, moq: 8000, lead_time_days: null, order_cycle_months: 1 },
-      E: { holding_months: 2, moq: 0, lead_time_days: null, order_cycle_months: 3 },
+      A: { holding_days: 75, moq: 0, lead_time_days: null, order_cycle_weeks: 4 },
+      B: { holding_days: null, moq: 0, lead_time_days: null, order_cycle_weeks: 4 },
+      C: { holding_days: 90, moq: 100, lead_time_days: 7, order_cycle_weeks: 4 },
+      D: { holding_days: 90, moq: 8000, lead_time_days: null, order_cycle_weeks: 4 },
+      E: { holding_days: 60, moq: 0, lead_time_days: null, order_cycle_weeks: 3 },
     }
     expect(changedSettings(original, edited)).toEqual([
-      { supplier: 'A', holding_months: 2.5, moq: 0, lead_time_days: null, order_cycle_months: 1 },
-      { supplier: 'B', holding_months: null, moq: 0, lead_time_days: null, order_cycle_months: 1 },
-      { supplier: 'D', holding_months: 3, moq: 8000, lead_time_days: null, order_cycle_months: 1 },
-      { supplier: 'E', holding_months: 2, moq: 0, lead_time_days: null, order_cycle_months: 3 },
+      { supplier: 'A', holding_days: 75, moq: 0, lead_time_days: null, order_cycle_weeks: 4 },
+      { supplier: 'B', holding_days: null, moq: 0, lead_time_days: null, order_cycle_weeks: 4 },
+      { supplier: 'D', holding_days: 90, moq: 8000, lead_time_days: null, order_cycle_weeks: 4 },
+      { supplier: 'E', holding_days: 60, moq: 0, lead_time_days: null, order_cycle_weeks: 3 },
     ])
   })
 
   it('skips suppliers that are not in the edited set and ignores unknown ones', () => {
-    const edited = { Z: { holding_months: 5, moq: 0, lead_time_days: null, order_cycle_months: 1 } }
+    const edited = { Z: { holding_days: 150, moq: 0, lead_time_days: null, order_cycle_weeks: 4 } }
     expect(changedSettings([view('A', null)], edited)).toEqual([])
   })
 })
@@ -94,24 +94,29 @@ describe('logValue', () => {
     expect(logValue('lead_time_days', null)).toBe('blank')
     expect(logValue('moq', 0)).toBe('0')
     expect(logValue('moq', 8000)).toBe('8,000')
+    expect(logValue('holding_days', null)).toBe('not set')
+    expect(logValue('holding_days', 60)).toBe('60 days')
+    // lines written before the holding moved to days keep reading in months
     expect(logValue('holding_months', null)).toBe('not set')
-    expect(logValue('holding_months', 2)).toBe('2')
-    expect(logValue('holding_months', 1.5)).toBe('1.5')
+    expect(logValue('holding_months', 1.5)).toBe('1.5 months')
+    expect(logValue('order_cycle_weeks', 4)).toBe('4 weeks')
+    expect(logValue('order_cycle_weeks', 1)).toBe('1 week')
+    // lines written before the cycle moved to weeks keep reading in months
     expect(logValue('order_cycle_months', 3)).toBe('3 months')
     expect(logValue('order_cycle_months', 1)).toBe('1 month')
   })
 })
-const CYCLE_ERROR = 'Order cycle must be a whole number of months from 1 to 12.'
+const CYCLE_ERROR = 'Order cycle must be a whole number of weeks from 1 to 52.'
 
 describe('validateOrderCycle', () => {
-  it('accepts whole months from 1 to 12', () => {
+  it('accepts whole weeks from 1 to 52', () => {
     expect(validateOrderCycle('1')).toEqual({ value: 1, error: null })
-    expect(validateOrderCycle(' 3 ')).toEqual({ value: 3, error: null })
-    expect(validateOrderCycle('12')).toEqual({ value: 12, error: null })
+    expect(validateOrderCycle(' 4 ')).toEqual({ value: 4, error: null })
+    expect(validateOrderCycle('52')).toEqual({ value: 52, error: null })
   })
 
   it('rejects blank, out-of-range, fractional and non-numeric text', () => {
-    for (const text of ['', ' ', '0', '13', '1.5', '-1', 'abc', '1e1']) {
+    for (const text of ['', ' ', '0', '53', '1.5', '-1', 'abc', '1e1']) {
       expect(validateOrderCycle(text)).toEqual({ value: null, error: CYCLE_ERROR })
     }
   })

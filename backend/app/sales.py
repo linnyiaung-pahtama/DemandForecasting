@@ -4,6 +4,7 @@ from io import BytesIO
 
 from openpyxl import load_workbook
 
+from app.cities import CITIES, branch_city
 from app.models import ActualSales, InputFileError, ParsedInput, ParseWarning, SalesExport
 from app.months import month_label, prev_months
 from app.parsing import _is_number, _month_number, _norm, _to_number, find_header_row
@@ -50,8 +51,10 @@ def parse_sales(data: bytes) -> SalesExport:
         raise InputFileError("The sales export has no sheet with itemCode, Year, Month and Qty columns.")
     rows, header_idx, columns = found
     c_item, c_year, c_month, c_qty = (columns[_norm(name)] for name in REQUIRED_COLUMNS)
+    c_branch = columns.get(_norm("BranchName"))
 
     pieces: dict[str, dict[str, float]] = {}
+    city_pieces: dict[str, dict[str, dict[str, float]]] = {c: {} for c in CITIES}
     months: set[str] = set()
     warnings: list[ParseWarning] = []
     skipped = 0
@@ -84,8 +87,11 @@ def parse_sales(data: bytes) -> SalesExport:
         months.add(key)
         by_month = pieces.setdefault(item, {})
         by_month[key] = by_month.get(key, 0.0) + qty
+        city_month = city_pieces[branch_city(cell(c_branch) if c_branch is not None else None)].setdefault(item, {})
+        city_month[key] = city_month.get(key, 0.0) + qty
 
-    return SalesExport(pieces=pieces, months=sorted(months), warnings=warnings, skipped_rows=skipped)
+    return SalesExport(pieces=pieces, months=sorted(months), warnings=warnings, skipped_rows=skipped,
+                       city_pieces=city_pieces, has_branch=c_branch is not None)
 
 
 def actual_cartons(export: SalesExport, parsed: ParsedInput) -> ActualSales:
@@ -132,4 +138,20 @@ def actual_cartons(export: SalesExport, parsed: ParsedInput) -> ActualSales:
         else:
             cartons[code] = {m: p / sku.packing_size for m, p in used.items()}
 
-    return ActualSales(months=actual_months, cartons=cartons, skus_with_sales=len(cartons), warnings=warnings)
+    # By city only when the Data sheet has the city forecast (a run split by Yangon / Mandalay).
+    city_cartons = None
+    if any(s.cities is not None for s in parsed.skus):
+        if not export.has_branch:
+            warnings.append(ParseWarning(
+                sap_code=None, column=None,
+                message="The Actual Sales file has no BranchName column; all its sales count as Yangon"))
+        city_cartons = {}
+        for city in CITIES:
+            city_cartons[city] = {}
+            for code, by_month in export.city_pieces.get(city, {}).items():
+                used = {m: p for m, p in by_month.items() if m in present}
+                if used and code in cartons:  # a usable Data SKU with a packing size
+                    city_cartons[city][code] = {m: p / data_skus[code].packing_size for m, p in used.items()}
+
+    return ActualSales(months=actual_months, cartons=cartons, skus_with_sales=len(cartons), warnings=warnings,
+                       city_cartons=city_cartons)

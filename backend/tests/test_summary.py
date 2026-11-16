@@ -23,7 +23,7 @@ def test_summary_rolls_up_real_fixtures():
     summary = summarize_suppliers(result)
     cfc = next(s for s in summary if s.supplier == "CFC")
     cfc_skus = [s for s in result.skus if s.supplier == "CFC"]
-    assert cfc.sku_count == 5 and cfc.holding_months == 3 and cfc.blocked_skus == 0
+    assert cfc.sku_count == 5 and cfc.holding_days == 90 and cfc.blocked_skus == 0
     assert cfc.total_order_qty == sum(s.order_qty for s in cfc_skus)
     assert cfc.skus_to_order == sum(1 for s in cfc_skus if s.order_qty > 0)
     assert all(s.blocked_skus == s.sku_count for s in summary if s.supplier != "CFC")
@@ -48,7 +48,8 @@ def test_old_run_settings_used_loads():
         "settings_used": [{"supplier": "CFC", "holding_months": 3}], "blocked_suppliers": [],
         "counts": {"TO_ORDER": 0}})
     [s] = summarize_suppliers(plan)
-    assert s.supplier == "CFC" and s.holding_months == 3 and s.moq is None and s.lead_time_days is None
+    # saved with the holding in months: shown in days
+    assert s.supplier == "CFC" and s.holding_days == 90 and s.moq is None and s.lead_time_days is None
 
 
 def test_supplier_monthly_totals():
@@ -65,41 +66,42 @@ def test_supplier_monthly_totals():
     assert blocked.monthly_order_qty is None and blocked.twelve_month_total is None
 
 
-def _cycle_three_cfc():
+def _cycle_twenty_six_cfc():
+    # a 26-week cycle from 12 Oct 2026 orders on 12 Oct and 12 Apr only, so most months have no order
     parsed = _parsed_with_stock()
     actual = actual_cartons(parse_sales((FIX / "sales_export.xlsx").read_bytes()), parsed)
-    return plan_all(parsed, actual, holding_settings({"CFC": 3}, moq=0, lead=7, cycle=3), date(2026, 10, 12))
+    return plan_all(parsed, actual, holding_settings({"CFC": 3}, moq=0, lead=7, cycle=26), date(2026, 10, 12))
 
 
 def test_summary_order_plan_this_month():
-    result = _cycle_three_cfc()
+    result = _cycle_twenty_six_cfc()
     summary = {s.supplier: s for s in summarize_suppliers(result)}
     cfc, cfc_skus = summary["CFC"], [s for s in result.skus if s.supplier == "CFC"]
-    assert cfc.order_cycle_months == 3
+    assert cfc.order_cycle_weeks == 26
     assert cfc.plan_total_order_qty == sum(s.plan_order_qty for s in cfc_skus)
     assert cfc.plan_skus_to_order == sum(1 for s in cfc_skus if s.plan_order_qty > 0)
-    assert cfc.plan_total_order_qty > cfc.total_order_qty   # three months' cover instead of one
+    assert cfc.plan_total_order_qty > cfc.total_order_qty   # eight months' cover (3 − 1 + 6) instead of three
     months = cfc.plan_monthly_order_qty
-    assert [m is not None for m in months] == [True, False, False] * 4
+    assert [m is not None for m in months] == [True] + [False] * 5 + [True] + [False] * 5   # Oct and Apr
     assert months[0] == cfc.plan_total_order_qty
-    assert months[3] == sum(s.order_plan[3].order for s in cfc_skus)
+    assert months[6] == sum(s.order_plan[6].order for s in cfc_skus)
     assert cfc.plan_twelve_month_total == sum(m for m in months if m is not None)
 
 
 def test_summary_order_plan_blank_for_blocked():
-    blocked = next(s for s in summarize_suppliers(_cycle_three_cfc()) if s.supplier != "CFC")
+    blocked = next(s for s in summarize_suppliers(_cycle_twenty_six_cfc()) if s.supplier != "CFC")
     assert blocked.plan_monthly_order_qty is None and blocked.plan_twelve_month_total is None
     assert (blocked.plan_skus_to_order, blocked.plan_total_order_qty) == (0, 0)   # like the forecast's 0 / 0
-    assert blocked.order_cycle_months == 1
+    assert blocked.order_cycle_weeks == 4
 
 
 def test_summary_old_run_has_blank_order_plan():
-    result = _cycle_three_cfc()
+    result = _cycle_twenty_six_cfc()
     for s in result.skus:      # as a run saved before the order cycle setting
-        s.order_plan = s.plan_order_qty = s.plan_status = s.order_cycle_months = None
-    result.settings_used = [s.model_copy(update={"order_cycle_months": None}) for s in result.settings_used]
+        s.order_plan = s.plan_order_qty = s.plan_status = s.order_cycle_weeks = None
+    result.settings_used = [s.model_copy(update={"order_cycle_weeks": None}) for s in result.settings_used]
     cfc = next(s for s in summarize_suppliers(result) if s.supplier == "CFC")
-    assert (cfc.order_cycle_months, cfc.plan_skus_to_order, cfc.plan_total_order_qty,
+    assert (cfc.order_cycle_weeks, cfc.plan_skus_to_order, cfc.plan_total_order_qty,
             cfc.plan_monthly_order_qty, cfc.plan_twelve_month_total) == (None, None, None, None, None)
     assert cfc.monthly_order_qty is not None
 

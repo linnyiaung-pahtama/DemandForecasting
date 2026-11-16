@@ -81,3 +81,17 @@ describe('filterSkus', () => {
     expect(codes(filterSkus(rows, none, 'plan'))).toEqual(['q', 'p', 'r'])
   })
 })
+
+describe('city filter', () => {
+  it('keeps only the chosen city, and every row with no city filter', () => {
+    const rows = [
+      sku('A', 'P', 'TO_ORDER', 5, { city: 'YGN' }),
+      sku('A', 'P', 'TO_ORDER', 3, { city: 'MDY' }),
+      sku('B', 'P', 'TO_ORDER', 1, { city: 'YGN' }),
+    ]
+    const base = { supplier: null, status: null, zeroForecastOnly: false, search: '' }
+    expect(filterSkus(rows, { ...base, city: 'MDY' }).map((s) => [s.sap_code, s.city])).toEqual([['A', 'MDY']])
+    expect(filterSkus(rows, { ...base, city: null })).toHaveLength(3)
+    expect(filterSkus(rows, base)).toHaveLength(3)
+  })
+})
