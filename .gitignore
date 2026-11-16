@@ -5,3 +5,6 @@ __pycache__/
 frontend/node_modules/
 frontend/dist/
 .superpowers/
+# Real business data: kept on this computer only.
+requests/
+checks/
