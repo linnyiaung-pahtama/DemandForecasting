@@ -11,8 +11,8 @@ CITY_DATA = with_city_forecast(DATA)   # the fixture plus YGN IMS / MDY IMS grou
 
 
 @pytest.fixture
-def client(tmp_path):
-    return TestClient(create_app(tmp_path / "t.db"))
+def client(db):
+    return TestClient(create_app(**db))
 
 
 def row(supplier, holding, moq=0, lead=None, cycle=4):
@@ -177,19 +177,17 @@ def test_window_coverage_warnings_reach_inspect_and_the_stored_run(client):
     assert [w["message"] for w in run["parsed"]["warnings"] if w["sap_code"] is None] == parsed_messages
 
 
-def test_saved_run_hides_shelf_life_and_mtd_warnings_stored_earlier(client, tmp_path):
+def test_saved_run_hides_shelf_life_and_mtd_warnings_stored_earlier(client, db_conn):
     import json
-    import sqlite3
-    from contextlib import closing
     run = client.post("/api/runs", files=files()).json()
-    with closing(sqlite3.connect(tmp_path / "t.db")) as conn, conn:
-        parsed = json.loads(conn.execute("SELECT parsed_json FROM runs WHERE id = ?", (run["id"],)).fetchone()[0])
-        parsed["warnings"] += [
-            {"sap_code": "3401111002", "column": parsed["mtd_label"],
-             "message": "negative MTD sales (not used in the order calculation)"},
-            {"sap_code": "120902330001", "column": "Shelf Life month",
-             "message": "shelf life 0 (not used in the order calculation)"}]
-        conn.execute("UPDATE runs SET parsed_json = ? WHERE id = ?", (json.dumps(parsed), run["id"]))
+    parsed = json.loads(db_conn.execute("SELECT parsed_json FROM runs WHERE id = %s", (run["id"],)).fetchone()["parsed_json"])
+    parsed["warnings"] += [
+        {"sap_code": "3401111002", "column": parsed["mtd_label"],
+         "message": "negative MTD sales (not used in the order calculation)"},
+        {"sap_code": "120902330001", "column": "Shelf Life month",
+         "message": "shelf life 0 (not used in the order calculation)"}]
+    db_conn.execute("UPDATE runs SET parsed_json = %s WHERE id = %s", (json.dumps(parsed), run["id"]))
+    db_conn.commit()
     shown = client.get(f"/api/runs/{run['id']}").json()["parsed"]["warnings"]
     assert shown == run["parsed"]["warnings"]
     assert not [w for w in shown if w["column"] in ("Shelf Life month", parsed["mtd_label"])]
@@ -337,20 +335,16 @@ def test_order_cycle_default_and_round_trip(client):
                                                    for e in log]
 
 
-def test_saved_month_cycle_run_shows_recalculate(tmp_path):
+def test_saved_month_cycle_run_shows_recalculate(client, db_conn):
     import json
-    import sqlite3
-    from contextlib import closing
-    db = tmp_path / "t.db"
-    client = TestClient(create_app(db))
     run_id = client.post("/api/runs", files=files()).json()["id"]
-    with closing(sqlite3.connect(db)) as c:   # rewrite the stored result as a run saved with a months cycle
-        result = json.loads(c.execute("SELECT result_json FROM runs WHERE id = ?", (run_id,)).fetchone()[0])
-        for item in result["skus"] + result["settings_used"]:
-            item.pop("order_cycle_weeks")
-            item["order_cycle_months"] = 3
-        c.execute("UPDATE runs SET result_json = ? WHERE id = ?", (json.dumps(result), run_id))
-        c.commit()
+    # rewrite the stored result as a run saved with a months cycle
+    result = json.loads(db_conn.execute("SELECT result_json FROM runs WHERE id = %s", (run_id,)).fetchone()["result_json"])
+    for item in result["skus"] + result["settings_used"]:
+        item.pop("order_cycle_weeks")
+        item["order_cycle_months"] = 3
+    db_conn.execute("UPDATE runs SET result_json = %s WHERE id = %s", (json.dumps(result), run_id))
+    db_conn.commit()
     old = client.get(f"/api/runs/{run_id}").json()["result"]
     assert all(s["order_plan"] is None and s["plan_order_qty"] is None for s in old["skus"])
     assert old["plan_counts"] is None and all(s["monthly"] is not None for s in old["skus"])

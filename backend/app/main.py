@@ -1,7 +1,6 @@
 """HTTP API: wires parsing, planning and storage to FastAPI routes."""
 import json
 from datetime import date
-from pathlib import Path
 
 from typing import Any
 
@@ -10,7 +9,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import ValidationError
 
-from app import config
 from app.commits import apply_commits, remove_commits
 from app.holding import drop_monthly_order_plan, forecast_window, plan_all, plan_date_bounds, validate_plan_date
 from app.export import XLSX_MEDIA_TYPE, build_export
@@ -130,9 +128,10 @@ def _parse_settings(items: list[Any]) -> list[SupplierSettings]:
     return settings
 
 
-def create_app(db_path: Path | None = None) -> FastAPI:
-    """App factory. Start the server with: uvicorn app.main:create_app --factory --app-dir backend"""
-    repo = Repository(db_path or config.DB_PATH)
+def create_app(database_url: str | None = None, schema: str | None = None) -> FastAPI:
+    """App factory. Start the server with: uvicorn app.main:create_app --factory --app-dir backend
+    The database is DATABASE_URL (backend/.env) unless given; `schema` is for the tests."""
+    repo = Repository(database_url, schema)
     app = FastAPI(title="Order Plan Tool")
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"],
                        allow_methods=["*"], allow_headers=["*"])

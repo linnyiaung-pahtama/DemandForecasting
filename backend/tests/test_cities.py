@@ -318,10 +318,10 @@ def test_export_has_city_columns_and_city_run_out_text():
     assert "Mandalay: runs out about 17 Oct, before its stock in transit arrives on 19 Oct" in warns
 
 
-def test_stored_sku_count_is_distinct_skus(tmp_path):
+def test_stored_sku_count_is_distinct_skus(db):
     from app.models import StockFileSummary, StockResult
     from app.repository import Repository
-    repo = Repository(tmp_path / "t.db")
+    repo = Repository(**db)
     result = _two_city_result()
     parsed = ParsedInput(skus=[], forecast_months=FC, mtd_month="2026-10", mtd_label="x",
                          mtd_end=date(2026, 10, 11), default_plan_date=PD, warnings=[])

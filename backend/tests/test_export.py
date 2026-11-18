@@ -38,8 +38,8 @@ def load(content: bytes) -> openpyxl.Workbook:
     return openpyxl.load_workbook(BytesIO(content))
 
 
-def test_export_v2_sheets_and_values(tmp_path):
-    c = TestClient(create_app(tmp_path / "t.db"))
+def test_export_v2_sheets_and_values(db):
+    c = TestClient(create_app(**db))
     item = {"supplier": "CFC", "holding_days": 90, "moq": 0, "lead_time_days": 7, "order_cycle_weeks": 4}
     assert c.put("/api/settings", json=[item]).status_code == 200
     run = c.post("/api/runs", files={"data_file": ("d.xlsx", with_city_forecast(DATA)), "sales_file": ("s.xlsx", SALES),

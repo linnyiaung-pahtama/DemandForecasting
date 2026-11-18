@@ -84,8 +84,8 @@ def files(data=CITY_DATA):
 
 
 @pytest.fixture
-def client(tmp_path):
-    return TestClient(create_app(tmp_path / "t.db"))
+def client(db):
+    return TestClient(create_app(**db))
 
 
 CODE = "3102111001"

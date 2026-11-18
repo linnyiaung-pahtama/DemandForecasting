@@ -8,3 +8,5 @@ frontend/dist/
 # Real business data: kept on this computer only.
 requests/
 checks/
+backend/.env
+backend/.env.pgtest

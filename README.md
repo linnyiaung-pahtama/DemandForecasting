@@ -2,11 +2,12 @@
 
 A local tool that turns the planner's Excel forecast, the Actual Sales file and two stock reports into a per-SKU order plan. Each cycle you upload five files (those plus the Stock in Transit file), and you set one holding (in days of stock) per principal. For every SKU the tool works out the average monthly demand, the stock you should hold, and the cartons to order to get there, with every number shown. It rolls the plan up by principal, exports it to Excel, and keeps a history of past runs.
 
-It runs on your own Windows computer: a Python (FastAPI) backend with a SQLite database, and a React web page in the browser.
+It runs on your own Windows computer: a Python (FastAPI) backend with a PostgreSQL database, and a React web page in the browser.
 
 ## Requirements
 
 - Python 3.12
+- PostgreSQL (see [Database](#database))
 - Node 22.12+ (22 or 24 LTS); needed by vitest 5, and the app uses React 19 and Vite 6
 
 ## First-time setup
@@ -281,35 +282,31 @@ Each SKU is planned **separately for Yangon and Mandalay**: the order demand for
 
 ## Database
 
-SQLite file at `backend/data/orderplan.db` (created on first start; not committed to git). It holds principal settings, the change log and all runs. To use a different file, set the `ORDERPLAN_DB` environment variable before starting the backend:
+**PostgreSQL.** It holds principal settings, the change log and all runs, in three tables created on first start (`supplier_settings`, `settings_log`, `runs`). The backend reads its settings from the environment or from `backend/.env` (git-ignored):
 
 ```
-$env:ORDERPLAN_DB = "C:\path\to\other.db"      # PowerShell
-export ORDERPLAN_DB=C:/path/to/other.db         # Git Bash
+DATABASE_URL=postgresql://127.0.0.1:5432/demandforecasting
+DATABASE_USER=df_app
+DATABASE_PASSWORD=<the login's password>
 ```
 
-The `$env:` setting applies only to the current PowerShell window. The `backend` and `frontend` entries in `.claude/launch.json` always use the default database. The `backend-test` entry (port 8001, with `frontend-test` on port 5174 pointing at it) uses its own scratch database, `backend/data/orderplan-test.db` (set through `ORDERPLAN_DB`; the file is created on first use and `backend/data/` is git-ignored), for trying things without touching real runs.
+`DATABASE_USER` / `DATABASE_PASSWORD` are used when the URL has no user of its own, so the password needs no URL-encoding. The login should own the database (it creates the tables). Without a `DATABASE_URL`, the backend uses `postgresql://127.0.0.1:5432/demandforecasting`.
 
-**Upgrading from v1.** If the database file is a v1 one (it has reorder/target days), the tool renames it to `orderplan.v1-backup.db` in the same folder (`orderplan.v1-backup-1.db`, `-2` and so on if that name is taken) and creates a fresh v2 database. Nothing is deleted. v1 runs and settings are not carried over.
+The tables mirror the SQLite layout the tool used up to version 8, in the same storage types: plans stay JSON text and dates ISO text, and the unused columns `holding_months` and `order_cycle_months` are kept so old change-log lines still make sense.
 
-**Upgrading from v2 (stock reports).** A v2 database is upgraded in place the first time the new backend starts: three columns (the two stock file names and the stock breakdown) are added to the runs table and the schema version moves to 3. Nothing is recreated or renamed, so your runs and holding settings stay. Older runs open and recalculate as before; they show "—" for the PG / PDG split and for the stock file names, and keep the total sellable stock as it was stored. Recalculating a run reuses the stock it stored and never reads files again. The upgrade is one-way, so if you want to keep a copy of the v2 file, copy `backend/data/orderplan.db` before restarting the backend.
+**Moving from the old SQLite file.** Up to version 8 the tool kept everything in `backend/data/orderplan.db`. To move it into PostgreSQL once, stop the backend, set the settings above, and from `backend/` run:
 
-**Upgrading to v4 (principal MOQ and lead time).** A v3 database is upgraded in place the first time the new backend starts:
-- `supplier_settings` gains MOQ (0 for every principal) and lead time columns, the change log gains a setting column, and the schema version moves to 4.
-- In the same step, and only then, each principal's lead time is filled in once from the latest saved run. A principal whose SKUs all had the same Data-sheet lead time gets it, and each value is written to the change log (blank → n days). MOQ is not filled in.
-- The upgrade does not recalculate any saved run. Until you recalculate it (or save settings), an older plan stays exactly as it was and shows "Saved before MOQ and lead time moved to Principal settings — Recalculate to use the current settings."
+```
+.venv/Scripts/python -m app.copy_from_sqlite data/orderplan.db      # Windows (Linux: .venv/bin/python)
+```
 
-To keep the v3 file, copy `backend/data/orderplan.db` to `orderplan.pre-v4-backup.db` before restarting the backend.
+It refuses unless the file is at version 8 (an older file: open it once with the last SQLite version of the tool, which upgrades it) and the PostgreSQL tables are empty, so nothing is overwritten. It copies the three tables in one transaction, keeping their IDs, moves PostgreSQL's ID counters past them so new rows don't collide, checks the row counts on both sides, and leaves the SQLite file unchanged. Keep the file as a backup.
 
-**Upgrading to v5 (order cycle).** A v4 database is upgraded in place the first time the new backend starts: `supplier_settings` gains an order cycle column, every principal starts at 1, and the schema version moves to 5. Nothing is written to the change log and no saved run is recalculated; an older plan shows its order demand forecast as before and "Recalculate to see the order plan" in Order plan mode. To keep the v4 file, copy `backend/data/orderplan.db` to `orderplan.pre-v5-backup.db` before restarting the backend.
-
-**Upgrading to v6 (order cycle in weeks).** A v5 database is upgraded in place the first time the new backend starts: `supplier_settings` gains an order cycle (weeks) column, every principal starts at 4 weeks, and the schema version moves to 6. The months cycle is not converted; its old column stays in the table unused, and its old change-log lines stay as history ("Order cycle (months)"). Nothing is written to the change log and no saved run is recalculated: a plan saved with a months cycle shows "Recalculate to see the order plan" in Order plan mode until it is recalculated. To keep the v5 file, copy `backend/data/orderplan.db` to `orderplan.pre-v6-backup.db` before restarting the backend.
-
-**Upgrading to v7 (holding in days).** A v6 database is upgraded in place the first time the new backend starts: `supplier_settings` gains a holding (days) column, filled from each principal's holding at 30 days a month (2 months becomes 60 days, so every buffer and order stays the same), and the schema version moves to 7. The months column stays in the table unused, and its old change-log lines stay as history ("Holding (months)"). Nothing is written to the change log. Saved plans load with their holding shown in days and their old target shown as the buffer; recalculate one to see the new Avg sales column. To keep the v6 file, copy `backend/data/orderplan.db` to `orderplan.pre-v7-backup.db` before restarting the backend.
-
-**Upgrading to v8 (Stock in Transit file).** A v7 database is upgraded in place the first time the new backend starts: the runs table gains a Stock in Transit file name column (blank for older runs, shown as "—" on the History page), and the schema version moves to 8. Nothing else changes and no saved run is recalculated. To keep the v7 file, copy `backend/data/orderplan.db` to `orderplan.pre-v8-backup.db` before restarting the backend.
+The `backend-test` entry in `.claude/launch.json` (port 8001, with `frontend-test` on port 5174 pointing at it) uses its own scratch database, `orderplan_scratch`, for trying things without touching real runs; create it once on your local PostgreSQL.
 
 ## Tests
+
+The backend tests need a PostgreSQL **test database**; each test works in its own throwaway schema there, dropped afterwards, so they never touch real data. Point them at it with `TEST_DATABASE_URL` (plus `TEST_DATABASE_USER` / `TEST_DATABASE_PASSWORD` when the URL has no user), either as environment variables or in `backend/.env.pgtest` (git-ignored). Tests that need no database run without it.
 
 PowerShell or Git Bash, from the project folder:
 
@@ -319,8 +316,6 @@ cd backend
 cd ..
 npm --prefix frontend test
 ```
-
-The backend tests run against a temporary database automatically (`backend/tests/conftest.py` sets `ORDERPLAN_DB` before the app is imported), so they never touch `backend/data/orderplan.db`.
 
 `npm --prefix frontend run build` type-checks and builds the frontend, and `npm --prefix frontend run lint` runs the linter.
 

@@ -1,10 +1,10 @@
-import sqlite3
-from contextlib import closing, contextmanager
+from contextlib import contextmanager
 from datetime import datetime
-from pathlib import Path
 from typing import Iterator
 
-from app.db import connect
+import psycopg
+
+from app.db import connect, init_schema
 from app.models import (
     DEFAULT_ORDER_CYCLE_WEEKS,
     ActualSales,
@@ -23,17 +23,18 @@ def _now() -> str:
 
 
 class Repository:
-    """SQLite-backed storage. One connection per call, so it is thread-safe."""
+    """PostgreSQL storage. One connection per call (committed on success, rolled back on an error), so it is
+    thread-safe."""
 
-    def __init__(self, db_path: Path):
-        self.db_path = Path(db_path)
-        with self._conn():
-            pass  # creates the file and schema up front
+    def __init__(self, database_url: str | None = None, schema: str | None = None):
+        self.database_url = database_url
+        self.schema = schema
+        with self._conn() as conn:
+            init_schema(conn)  # creates the tables up front
 
     @contextmanager
-    def _conn(self) -> Iterator[sqlite3.Connection]:
-        # `with conn` commits/rolls back; closing() releases the handle.
-        with closing(connect(self.db_path)) as conn, conn:
+    def _conn(self) -> Iterator[psycopg.Connection]:
+        with connect(self.database_url, self.schema) as conn:
             yield conn
 
     def get_settings(self) -> dict[str, SupplierSettings]:
@@ -61,8 +62,8 @@ class Repository:
                 conn.execute(
                     "INSERT INTO supplier_settings"
                     " (supplier, holding_days, moq, lead_time_days, order_cycle_weeks, updated_at)"
-                    " VALUES (?, ?, ?, ?, ?, ?)"
-                    " ON CONFLICT(supplier) DO UPDATE SET"
+                    " VALUES (%s, %s, %s, %s, %s, %s)"
+                    " ON CONFLICT (supplier) DO UPDATE SET"
                     " holding_days = excluded.holding_days, moq = excluded.moq,"
                     " lead_time_days = excluded.lead_time_days, order_cycle_weeks = excluded.order_cycle_weeks,"
                     " updated_at = excluded.updated_at",
@@ -70,21 +71,21 @@ class Repository:
                      now),
                 )
                 for field in changed:
-                    cur = conn.execute(
+                    row = conn.execute(
                         "INSERT INTO settings_log (supplier, field, old_value, new_value, changed_at)"
-                        " VALUES (?, ?, ?, ?, ?)",
+                        " VALUES (%s, %s, %s, %s, %s) RETURNING id",
                         (item.supplier, field, getattr(old, field), getattr(item, field), now),
-                    )
-                    log_ids.append(int(cur.lastrowid))
+                    ).fetchone()
+                    log_ids.append(int(row["id"]))
                 stored[item.supplier] = item
-            rows = [conn.execute("SELECT * FROM settings_log WHERE id = ?", (i,)).fetchone()
+            rows = [conn.execute("SELECT * FROM settings_log WHERE id = %s", (i,)).fetchone()
                     for i in log_ids]
         return [_log_entry(r) for r in rows]
 
     def get_settings_log(self, limit: int = 200) -> list[SettingsLogEntry]:
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT * FROM settings_log ORDER BY id DESC LIMIT ?", (limit,)
+                "SELECT * FROM settings_log ORDER BY id DESC LIMIT %s", (limit,)
             ).fetchall()
         return [_log_entry(r) for r in rows]
 
@@ -92,10 +93,10 @@ class Repository:
                    sit_file_name: str, parsed: ParsedInput, actual: ActualSales, stock: StockResult,
                    result: HoldingPlan) -> int:
         with self._conn() as conn:
-            cur = conn.execute(
+            row = conn.execute(
                 "INSERT INTO runs (created_at, file_name, sales_file_name, pg_file_name, pdg_file_name,"
                 " sit_file_name, plan_date, sku_count, parsed_json, actual_json, stock_json, result_json)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
                 (
                     _now(),
                     file_name,
@@ -110,13 +111,13 @@ class Repository:
                     stock.model_dump_json(),
                     result.model_dump_json(),
                 ),
-            )
-            return int(cur.lastrowid)
+            ).fetchone()
+            return int(row["id"])
 
     def update_run_result(self, run_id: int, result: HoldingPlan) -> None:
         with self._conn() as conn:
             conn.execute(
-                "UPDATE runs SET plan_date = ?, sku_count = ?, result_json = ? WHERE id = ?",
+                "UPDATE runs SET plan_date = %s, sku_count = %s, result_json = %s WHERE id = %s",
                 (result.plan_date.isoformat(), len({s.sap_code for s in result.skus}), result.model_dump_json(), run_id),
             )
 
@@ -124,14 +125,14 @@ class Repository:
         """Save a run's changed inputs (its commits) and its recalculated result in place."""
         with self._conn() as conn:
             conn.execute(
-                "UPDATE runs SET parsed_json = ?, plan_date = ?, sku_count = ?, result_json = ? WHERE id = ?",
+                "UPDATE runs SET parsed_json = %s, plan_date = %s, sku_count = %s, result_json = %s WHERE id = %s",
                 (parsed.model_dump_json(), result.plan_date.isoformat(), len({s.sap_code for s in result.skus}),
                  result.model_dump_json(), run_id),
             )
 
     def get_run(self, run_id: int) -> RunRecord | None:
         with self._conn() as conn:
-            row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+            row = conn.execute("SELECT * FROM runs WHERE id = %s", (run_id,)).fetchone()
         if row is None:
             return None
         return RunRecord(
@@ -157,7 +158,7 @@ class Repository:
                 " plan_date, sku_count"
                 " FROM runs ORDER BY id DESC"
             ).fetchall()
-        return [RunListItem(**dict(r)) for r in rows]
+        return [RunListItem(**r) for r in rows]
 
     def latest_run_id(self) -> int | None:
         with self._conn() as conn:
@@ -168,13 +169,13 @@ class Repository:
 SETTING_FIELDS = ("holding_days", "moq", "lead_time_days", "order_cycle_weeks")
 
 
-def _settings(row: sqlite3.Row) -> SupplierSettings:
+def _settings(row: dict) -> SupplierSettings:
     return SupplierSettings(supplier=row["supplier"], holding_days=row["holding_days"],
                             moq=row["moq"], lead_time_days=row["lead_time_days"],
                             order_cycle_weeks=row["order_cycle_weeks"])
 
 
-def _log_entry(row: sqlite3.Row) -> SettingsLogEntry:
+def _log_entry(row: dict) -> SettingsLogEntry:
     return SettingsLogEntry(
         id=row["id"],
         supplier=row["supplier"],
